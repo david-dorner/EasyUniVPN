@@ -4,6 +4,20 @@ All notable changes to EasyUniVPN are documented here. The version number of
 the latest entry must match the `VERSION` file - the release workflow reads
 both to build and publish a GitHub release automatically.
 
+## 1.0.1 - 2026-07-03
+
+Bug fixes.
+
+- Fixed the uninstaller hanging forever: its credential-cleanup step ran on a
+  hidden console and waited on an invisible "Set up EasyUniVPN now?" prompt
+- Quit and Disconnect now also stop VPN sessions the tray did not start
+  itself (for example after the tray was restarted while connected)
+- Installer and uninstaller process cleanup now kills child processes too, so
+  a leftover python.exe can no longer keep runtime files locked
+- VPN state monitoring switched from a permanently blocked wait thread to OS
+  callback notifications (NotifyUnicastIpAddressChange), with proper
+  deregistration when the tray quits
+
 ## 1.0.0 - 2026-07-03
 
 First stable release.

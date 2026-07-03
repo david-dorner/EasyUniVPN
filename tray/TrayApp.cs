@@ -26,9 +26,9 @@ internal enum TrayState
 /// <summary>
 /// The system tray icon and menu - mirrors <c>tray/app.py::TrayApp</c>.
 ///
-/// Two event sources drive state transitions, both running on background threads:
+/// Two event sources drive state transitions:
 /// <list type="bullet">
-///   <item><c>MonitorAsync</c> - awaits <c>NotifyAddrChange</c>; handles tunnel up/down.</item>
+///   <item><c>IpMonitor</c> - OS-invoked callback on IP address changes; handles tunnel up/down.</item>
 ///   <item><c>WatchProcessAsync</c> - awaits process exit; catches auth failures.</item>
 /// </list>
 ///
@@ -43,6 +43,7 @@ internal sealed class TrayApp : IDisposable
     private readonly ContextMenuStrip _menuStrip;
     private readonly VpnController _vpn;
     private readonly HotkeyWindow _hotkey;
+    private readonly IpMonitor _ipMonitor;
     private readonly CancellationTokenSource _cts = new();
     private readonly bool _verbose;
     private int _otpBusy; // 0=idle, 1=in-progress; Interlocked to drop rapid re-triggers
@@ -95,42 +96,33 @@ internal sealed class TrayApp : IDisposable
         else
             Notify("EasyUniVPN", "Hotkey ready - press Ctrl+Alt+V anywhere to paste your OTP.");
 
-        StartMonitors();
+        // Register for IP-change notifications (callback-based - no thread is
+        // parked waiting; the OS calls in when an address changes).
+        _ipMonitor = new IpMonitor(OnIpChanged);
     }
 
     // ── monitors ─────────────────────────────────────────────────────────
 
-    private void StartMonitors()
-    {
-        var token = _cts.Token;
-        _ = Task.Run(() => MonitorAsync(token), token);
-    }
-
     /// <summary>
-    /// Awaits IP address changes via NotifyAddrChange and flips steady-state.
-    /// Mirrors <c>tray/app.py::monitor()</c> exactly:
+    /// Invoked by <see cref="IpMonitor"/> (coalesced, on a thread-pool thread)
+    /// after any IP address change. Re-checks the actual VPN state and flips
+    /// steady-state. Mirrors <c>tray/app.py::monitor()</c>:
     /// <list type="bullet">
     ///   <item>CONNECTING + VPN appeared → CONNECTED</item>
     ///   <item>CONNECTED/DISCONNECTING + VPN gone → DISCONNECTED</item>
     ///   <item>CONNECTING + VPN gone → ignored (WatchProcess handles that)</item>
     /// </list>
     /// </summary>
-    private async Task MonitorAsync(CancellationToken token)
+    private void OnIpChanged()
     {
-        while (!token.IsCancellationRequested)
-        {
-            bool changed;
-            try { changed = await IpMonitor.WaitForChangeAsync(token); }
-            catch (OperationCanceledException) { break; }
+        if (_cts.IsCancellationRequested)
+            return;
 
-            if (!changed || token.IsCancellationRequested) break;
-
-            bool connected = VpnController.IsConnected();
-            if (connected && _state is TrayState.Disconnected or TrayState.Connecting)
-                SetState(TrayState.Connected);
-            else if (!connected && _state is TrayState.Connected or TrayState.Disconnecting)
-                SetState(TrayState.Disconnected);
-        }
+        bool connected = VpnController.IsConnected();
+        if (connected && _state is TrayState.Disconnected or TrayState.Connecting)
+            SetState(TrayState.Connected);
+        else if (!connected && _state is TrayState.Connected or TrayState.Disconnecting)
+            SetState(TrayState.Disconnected);
     }
 
     /// <summary>
@@ -278,7 +270,13 @@ internal sealed class TrayApp : IDisposable
     {
         try
         {
-            _vpn.Disconnect();
+            // Mirrors tray/app.py::_do_disconnect(): kill our own process tree
+            // if we started this session; otherwise fall back to disconnecting
+            // whatever session is up (e.g. started by a previous tray instance).
+            if (_vpn.Process is { HasExited: false })
+                _vpn.Disconnect();
+            else if (VpnController.IsConnected())
+                VpnController.DisconnectExternalSession();
         }
         catch (Exception ex)
         {
@@ -445,8 +443,10 @@ internal sealed class TrayApp : IDisposable
         if (_state is TrayState.Connected or TrayState.Connecting
                       or TrayState.Disconnecting)
         {
+            // 15 s budget: the external-session fallback path waits up to 10 s
+            // for openconnect-saml plus 5 s for the orphan openconnect cleanup.
             var disconnectTask = Task.Run(DoDisconnect);
-            disconnectTask.Wait(TimeSpan.FromSeconds(10));
+            disconnectTask.Wait(TimeSpan.FromSeconds(15));
 
             // Last-resort kill if DoDisconnect timed out.
             if (_vpn.Process is { HasExited: false })
@@ -540,6 +540,9 @@ internal sealed class TrayApp : IDisposable
     public void Dispose()
     {
         _cts.Cancel();
+        // Deregister the IP-change callback first so no notification can
+        // arrive while the rest of the tray is being torn down.
+        _ipMonitor.Dispose();
         _cts.Dispose();
         _hotkey.Dispose();
         _trayIcon.Visible = false;

@@ -77,12 +77,17 @@ Filename: "{app}\{#MyAppLauncherExeName}"; Description: "Launch EasyUniVPN"; Fla
 ; Kill all EasyUniVPN processes and the VPN tunnel before touching any files.
 ; Order matters: stop the tray/launcher first (they own the VPN process tree),
 ; then explicitly kill the VPN binaries in case they outlived their parent.
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM EasyUniVPN.exe";          Flags: runhidden waituntilterminated; RunOnceId: "KillTray"
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM EasyUniVPNLauncher.exe";  Flags: runhidden waituntilterminated; RunOnceId: "KillLauncher"
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM openconnect-saml.exe";    Flags: runhidden waituntilterminated; RunOnceId: "KillOcSaml"
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM openconnect.exe";         Flags: runhidden waituntilterminated; RunOnceId: "KillOpenconnect"
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM EasyUniVPNCli.exe";       Flags: runhidden waituntilterminated; RunOnceId: "KillCli"
-Filename: "{app}\{#MyAppExeName}"; Parameters: "reset"; Flags: runhidden waituntilterminated; RunOnceId: "ResetEasyUniVPN"
+; /T kills each process's children too - openconnect-saml.exe runs python.exe
+; underneath it, which would otherwise survive and keep runtime files locked.
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /T /IM EasyUniVPN.exe";          Flags: runhidden waituntilterminated; RunOnceId: "KillTray"
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /T /IM EasyUniVPNLauncher.exe";  Flags: runhidden waituntilterminated; RunOnceId: "KillLauncher"
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /T /IM openconnect-saml.exe";    Flags: runhidden waituntilterminated; RunOnceId: "KillOcSaml"
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /T /IM openconnect.exe";         Flags: runhidden waituntilterminated; RunOnceId: "KillOpenconnect"
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /T /IM EasyUniVPNCli.exe";       Flags: runhidden waituntilterminated; RunOnceId: "KillCli"
+; --no-prompt: reset runs on a hidden console that still counts as a TTY, so
+; without it the "Set up EasyUniVPN now?" prompt would block the uninstaller
+; forever on a window nobody can see.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "reset --no-prompt"; Flags: runhidden waituntilterminated; RunOnceId: "ResetEasyUniVPN"
 ; reset only disables the task; fully delete it on uninstall so nothing is left.
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ""EasyUniVPN"" /F"; Flags: runhidden waituntilterminated; RunOnceId: "DeleteAutostartTask"
 
@@ -318,7 +323,7 @@ var
 begin
   if Confirm and (CurPageID = wpInstalling) then begin
     BootstrapCancelled := True;
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM EasyUniVPNCli.exe',
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM EasyUniVPNCli.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // Wipe any partial Python download - not in [Files] so not removed by rollback.
     Exec(ExpandConstant('{sys}\cmd.exe'),
@@ -334,15 +339,17 @@ begin
   if CurStep = ssInstall then begin
     // Hard-kill all EasyUniVPN processes and the VPN tunnel so Windows
     // releases file locks before Setup copies the new binaries over.
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM EasyUniVPN.exe',
+    // /T includes each process's children (openconnect-saml.exe runs
+    // python.exe underneath it).
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM EasyUniVPN.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM EasyUniVPNLauncher.exe',
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM EasyUniVPNLauncher.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM openconnect-saml.exe',
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM openconnect-saml.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM openconnect.exe',
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM openconnect.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM EasyUniVPNCli.exe',
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM EasyUniVPNCli.exe',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 

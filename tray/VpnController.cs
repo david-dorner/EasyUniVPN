@@ -93,6 +93,56 @@ internal sealed class VpnController : IDisposable
         }
     }
 
+    /// <summary>
+    /// Stop a VPN session this controller does not own - e.g. one started by
+    /// a previous tray instance that is still up after the tray restarted.
+    /// Mirrors <c>vpn.py::disconnect_active_session()</c>: ask openconnect-saml
+    /// to disconnect the profile, then kill any orphaned openconnect.exe that
+    /// survived its parent.
+    /// </summary>
+    internal static void DisconnectExternalSession()
+    {
+        TrayLog.Info("Disconnecting an externally started VPN session");
+        try
+        {
+            bool useScript = File.Exists(AppPaths.OcSamlExe);
+            ProcessStartInfo psi = useScript
+                ? new ProcessStartInfo(AppPaths.OcSamlExe, $"disconnect {AppPaths.ProfileName}")
+                : new ProcessStartInfo(AppPaths.PythonExe,
+                    $"-m openconnect_saml.cli disconnect {AppPaths.ProfileName}");
+            psi.CreateNoWindow         = true;
+            psi.UseShellExecute        = false;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError  = true;
+            foreach (var kv in AppPaths.OpenConnectEnv())
+                psi.EnvironmentVariables[kv.Key] = kv.Value;
+
+            using var proc = Process.Start(psi);
+            // Bounded wait: OnQuit budgets 15 s for the whole disconnect, and
+            // the orphan cleanup below must still get its turn.
+            proc?.WaitForExit(10_000);
+        }
+        catch (Exception ex) { TrayLog.Warn($"External disconnect: {ex.Message}"); }
+
+        // Kill any orphaned openconnect.exe that outlived the wrapper - it is
+        // what actually holds the tunnel open.
+        try
+        {
+            using var killer = Process.Start(new ProcessStartInfo("taskkill",
+                "/F /T /IM openconnect.exe")
+            {
+                CreateNoWindow    = true,
+                UseShellExecute   = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+            });
+            killer?.WaitForExit(5_000);
+        }
+        catch (Exception ex) { TrayLog.Warn($"openconnect cleanup: {ex.Message}"); }
+
+        RecordSessionEnded();
+    }
+
     internal static void KillTree(int pid)
     {
         try

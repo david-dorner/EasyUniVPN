@@ -5,10 +5,24 @@ namespace EasyUniVPN;
 
 internal static class NativeMethods
 {
-    // ── IP change notification ────────────────────────────────────────────
+    // ── IP change notification (callback-based, no blocked thread) ───────
+    // Callback signature per netioapi.h: PUNICAST_IPADDRESS_CHANGE_CALLBACK.
+    // Row and NotificationType are unused by EasyUniVPN - any notification
+    // just triggers a fresh VPN-state check - so they stay opaque IntPtr/int.
 
-    [DllImport("iphlpapi.dll", SetLastError = true)]
-    internal static extern uint NotifyAddrChange(out IntPtr handle, IntPtr overlapped);
+    internal delegate void IpAddressChangeCallback(IntPtr callerContext, IntPtr row, int notificationType);
+
+    [DllImport("iphlpapi.dll")]
+    internal static extern uint NotifyUnicastIpAddressChange(
+        ushort family,
+        IpAddressChangeCallback callback,
+        IntPtr callerContext,
+        [MarshalAs(UnmanagedType.U1)] bool initialNotification,
+        // In/out per the API contract: must be IntPtr.Zero going in.
+        ref IntPtr notificationHandle);
+
+    [DllImport("iphlpapi.dll")]
+    internal static extern uint CancelMibChangeNotify2(IntPtr notificationHandle);
 
     // ── icon management ───────────────────────────────────────────────────
 

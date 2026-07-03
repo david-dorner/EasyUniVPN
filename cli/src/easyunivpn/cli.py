@@ -164,7 +164,7 @@ def status(verbose: bool = False) -> int:
     return 0
 
 
-def reset(verbose: bool = False) -> int:
+def reset(verbose: bool = False, prompt: bool = True) -> int:
     import contextlib
     import keyring
 
@@ -176,8 +176,12 @@ def reset(verbose: bool = False) -> int:
     disable_startup()
     logger.info("Configuration reset complete. Saved credentials, profile, and settings were removed.")
 
-    # Only prompt when a real user is at the terminal (not the uninstaller or tests).
-    if sys.stdin.isatty() and sys.stdout.isatty():
+    # Only prompt when a real user is at the terminal. The isatty check alone
+    # is not enough to detect the uninstaller: it runs this command on a
+    # SW_HIDE console, which still reports as a TTY, so input() would block
+    # forever on a window nobody can see. The uninstaller therefore passes
+    # --no-prompt explicitly (prompt=False).
+    if prompt and sys.stdin.isatty() and sys.stdout.isatty():
         try:
             answer = input("Set up EasyUniVPN now? [y/N] ").strip().lower()
             if answer in ("y", "yes"):
@@ -246,9 +250,12 @@ def _build_parser() -> argparse.ArgumentParser:
     setup_parser = sub.add_parser("setup", parents=[verbosity], help="Run the interactive setup wizard.")
     setup_parser.add_argument("--skip-validation", action="store_true", help=argparse.SUPPRESS)
 
-    sub.add_parser(
+    reset_parser = sub.add_parser(
         "reset", parents=[verbosity], help="Remove all saved credentials, profile, and configuration."
     )
+    # Used by the uninstaller, which runs reset on a hidden console where an
+    # interactive prompt would hang forever (see reset()).
+    reset_parser.add_argument("--no-prompt", dest="no_prompt", action="store_true", help=argparse.SUPPRESS)
 
     sub.add_parser(
         "status",
@@ -346,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
         return _offer_to_launch(args.verbose)
 
     if args.command == "reset":
-        return reset(verbose=args.verbose)
+        return reset(verbose=args.verbose, prompt=not args.no_prompt)
 
     if args.command == "status":
         return status(verbose=args.verbose)

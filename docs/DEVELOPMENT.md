@@ -79,7 +79,7 @@ EasyUniVPNLauncher.exe  (Rust)
 EasyUniVPN.exe  (C# tray)
    ├─ single-instance mutex guard (second instance exits silently)
    ├─ admin safety net (re-launches itself elevated if started directly)
-   ├─ TrayApp: icon + context menu; MonitorAsync watches NotifyAddrChange
+   ├─ TrayApp: icon + context menu; IpMonitor callback watches IP changes
    ├─ Connect     → VpnController.Connect() → openconnect-saml subprocess
    ├─ Disconnect  → kill the openconnect process tree (taskkill /F /T)
    ├─ Setup       → spawns EasyUniVPNCli.exe setup in a new console
@@ -99,9 +99,11 @@ EasyUniVPNCli.exe  (Python CLI - run `EasyUniVPNCli.exe --help` for all commands
 
 Two event sources drive transitions, both without polling:
 
-- **MonitorAsync** blocks on `NotifyAddrChange` (iphlpapi). On any IP change
-  it re-checks `netsh interface show interface` for the VPN adapter and flips
-  steady states.
+- **IpMonitor** registers a `NotifyUnicastIpAddressChange` callback (iphlpapi)
+  once at startup - no thread is parked waiting. On any IP address change the
+  OS calls in; notifications arrive in bursts, so they are coalesced (~400 ms)
+  before re-checking `netsh interface show interface` for the VPN adapter and
+  flipping steady states. `CancelMibChangeNotify2` deregisters on quit.
 - **WatchProcessAsync** awaits the openconnect-saml process exit and resets
   to DISCONNECTED - this is what catches authentication failures during
   CONNECTING, where no IP change ever happens.
