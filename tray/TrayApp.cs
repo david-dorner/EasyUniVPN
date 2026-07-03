@@ -99,6 +99,10 @@ internal sealed class TrayApp : IDisposable
         // Register for IP-change notifications (callback-based - no thread is
         // parked waiting; the OS calls in when an address changes).
         _ipMonitor = new IpMonitor(OnIpChanged);
+
+        // Measure the login server's clock offset in the background so the
+        // first Ctrl+Alt+V paste already generates a server-time TOTP code.
+        ServerClock.WarmUp();
     }
 
     // ── monitors ─────────────────────────────────────────────────────────

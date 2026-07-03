@@ -35,6 +35,8 @@ by installer/runtime.py → apply_headless_patch):
     messages (German and English) and writes a probe log for test calibration.
   - _get_totp_after_cooldown waits out the TOTP anti-replay window recorded
     during setup before submitting a code.
+  - TOTP codes are generated from the server's clock (offset measured from
+    HTTP Date headers), so a wrong local system clock cannot break login.
 """
 
 from __future__ import annotations
@@ -146,6 +148,11 @@ class HeadlessAuthenticator:
         self.allowed_hosts: list[str] | None = list(allowed_hosts) if allowed_hosts else None
         self.verify_tls = verify_tls
         self.auth_script = auth_script
+        # Seconds the server's clock is ahead of (positive) or behind
+        # (negative) the local clock. Updated from the Date header of every
+        # response by _record_server_clock; used to generate TOTP codes that
+        # match the server's window even when the local clock is wrong.
+        self._server_clock_offset = 0.0
         self.session = self._create_session()
 
     def _create_session(self):
@@ -175,7 +182,27 @@ class HeadlessAuthenticator:
             # ``REQUESTS_CA_BUNDLE`` env var would otherwise override
             # ``session.verify=False`` and silently re-enable verification.
             session.trust_env = False
+        session.hooks["response"].append(self._record_server_clock)
         return session
+
+    def _record_server_clock(self, response, **kwargs):
+        """Response hook: track how far the server's clock is from the local one.
+
+        Every response in the SAML flow carries an HTTP Date header (1-second
+        resolution, so the measurement is accurate to a couple of seconds -
+        well within a 30-second TOTP window). The most recent response wins,
+        which is also the server the TOTP code is about to be submitted to.
+        """
+        date_header = response.headers.get("Date")
+        if not date_header:
+            return response
+        try:
+            from email.utils import parsedate_to_datetime
+            server_now = parsedate_to_datetime(date_header).timestamp()
+            self._server_clock_offset = server_now - time.time()
+        except Exception:
+            pass
+        return response
 
     def _host_allowed(self, url: str) -> bool:
         """Check if ``url``'s hostname is on the whitelist.
@@ -1138,7 +1165,41 @@ class HeadlessAuthenticator:
                         pass
         except Exception:
             pass
-        return self.credentials.totp  # Fresh code after the wait
+        return self._compute_totp_at_server_time()  # Fresh code after the wait
+
+    def _compute_totp_at_server_time(self):
+        """Compute the current TOTP code from the server's clock, not the local one.
+
+        ``credentials.totp`` generates the code from the local system clock;
+        if that clock is off by more than the server's tolerance (Keycloak
+        accepts roughly +/-30 seconds), every login fails even though the
+        secret is correct. The response hook keeps ``_server_clock_offset``
+        current throughout the SAML flow, so generating the code at
+        ``local time + offset`` always lands in the window the server is
+        actually in. Falls back to the plain local-clock code if the raw
+        secret cannot be obtained.
+        """
+        offset = getattr(self, "_server_clock_offset", 0.0)
+        try:
+            secret = None
+            if self.credentials is not None:
+                secret = getattr(self.credentials, "_totp_secret", None)
+                if not secret:
+                    import keyring
+                    secret = keyring.get_password(
+                        "openconnect-saml", "totp/" + self.credentials.username
+                    )
+            if secret:
+                import pyotp
+                if abs(offset) >= 5:
+                    logger.debug(
+                        "Compensating local clock skew for TOTP",
+                        offset_seconds=round(offset, 1),
+                    )
+                return pyotp.TOTP(secret).at(int(time.time() + offset))
+        except Exception:
+            pass
+        return self.credentials.totp
 
     @staticmethod
     def _find_meta_refresh(doc, base_url):

@@ -149,7 +149,14 @@ copies it over the installed package (`apply_headless_patch()` in
    records every checked page so the signal list can be recalibrated when
    the university changes its login pages (see `tests/01-ProbeAuth.Tests.ps1`
    and the hidden `probe-auth` CLI command).
-3. **TOTP anti-replay cooldown** - Keycloak refuses to accept the same TOTP
+3. **Server-time TOTP generation** - codes are computed at
+   `local time + server clock offset`, where the offset is measured from the
+   HTTP `Date` header of every response in the SAML flow (a `requests`
+   response hook). A wrong local system clock therefore cannot push the code
+   outside the window Keycloak accepts (roughly +/-30 seconds). The C# tray
+   applies the same correction for Ctrl+Alt+V pastes via `ServerClock.cs`,
+   which probes the login server's `Date` header in the background.
+4. **TOTP anti-replay cooldown** - Keycloak refuses to accept the same TOTP
    code twice within its 30-second window. Setup validates credentials by
    performing a real login, which consumes the current code. After a
    successful validation, `validate_auth()` (in `cli/src/common/vpn.py`)
@@ -182,7 +189,8 @@ of which app owns the shortcut or has focus. On Ctrl+Alt+V:
    in flight (a re-trigger would snapshot the OTP itself as "what to restore").
 3. A dedicated STA thread (OLE clipboard requirement) reads the TOTP secret
    from Credential Manager, computes the RFC 6238 code (`Totp.cs`, HMAC-SHA1,
-   30 s period, 6 digits), snapshots the clipboard, places the code on it,
+   30 s period, 6 digits) at server-corrected time (`ServerClock.cs`, see the
+   authentication section), snapshots the clipboard, places the code on it,
    and sends a genuine Ctrl+V via a single atomic `SendInput` batch -
    releasing the still-held Ctrl and Alt keys first so the target app sees a
    clean Ctrl+V.

@@ -4,6 +4,19 @@ All notable changes to EasyUniVPN are documented here. The version number of
 the latest entry must match the `VERSION` file - the release workflow reads
 both to build and publish a GitHub release automatically.
 
+## 1.0.2 - 2026-07-03
+
+Reliability: one-time codes no longer depend on the system clock being right.
+
+- TOTP codes for VPN sign-in are now generated from the university server's
+  own clock (measured from the HTTP Date header during the login flow), so a
+  wrong Windows clock can no longer cause "invalid code" failures
+- The Ctrl+Alt+V one-time-code paste applies the same correction: the tray
+  measures the login server's clock offset in the background and warns in the
+  log when the local clock is noticeably off
+- With a correctly set clock nothing changes; with no network the paste
+  falls back to the local clock as before
+
 ## 1.0.1 - 2026-07-03
 
 Bug fixes.

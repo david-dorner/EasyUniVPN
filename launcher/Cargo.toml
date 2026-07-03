@@ -2,7 +2,7 @@
 # Keep version in sync with the VERSION file at the repository root - build.ps1
 # verifies the two match and fails the build on drift.
 name = "launcher"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 description = "EasyUniVPN launcher - tiny native binary that handles UAC elevation and spawns the tray app"
 license = "GPL-3.0-or-later"

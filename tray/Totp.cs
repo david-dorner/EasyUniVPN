@@ -18,7 +18,9 @@ internal static class Totp
         try
         {
             byte[] key     = Base32Decode(base32Secret);
-            long   counter = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 30;
+            // ServerClock corrects for a wrong local system clock, so the code
+            // matches the window the university's Keycloak is actually in.
+            long   counter = ServerClock.UtcNow.ToUnixTimeSeconds() / 30;
 
             // Counter as 8-byte big-endian (RFC 4226 §5.2)
             var cb = BitConverter.GetBytes(counter);
@@ -41,7 +43,7 @@ internal static class Totp
 
     /// <summary>Returns remaining seconds in the current 30-second TOTP window.</summary>
     internal static int SecondsRemaining()
-        => 30 - (int)(DateTimeOffset.UtcNow.ToUnixTimeSeconds() % 30);
+        => 30 - (int)(ServerClock.UtcNow.ToUnixTimeSeconds() % 30);
 
     private static byte[] Base32Decode(string s)
     {
