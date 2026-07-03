@@ -5,14 +5,14 @@
 
 .DESCRIPTION
     Wipes all previous build artifacts, then produces a fresh installer at
-    .\dist\EasyUniVPNSetup.exe.
+    .\dist\EasyUniVPNSetup-<version>.exe.
 
     Build steps:
       0. Clean       - delete launcher\target\, tray\bin\, tray\obj\, cli\build\, dist\
       1. Python CLI  - cli\build_cli.ps1  →  cli\build\EasyUniVPNCli.exe
       2. Rust        - cargo build        →  launcher\target\release\EasyUniVPNLauncher.exe
       3. C# tray     - dotnet publish     →  tray\bin\publish\EasyUniVPN.exe
-      4. Inno Setup  - ISCC.exe           →  dist\EasyUniVPNSetup.exe
+      4. Inno Setup  - ISCC.exe           →  dist\EasyUniVPNSetup-<version>.exe
 
     Inno Setup 6 must be installed (https://jrsoftware.org/isdl.php).
     Python 3.12+ must be on PATH (for the CLI build step).
@@ -152,12 +152,12 @@ Write-Host ("  OK   EasyUniVPN.exe          {0}" -f (FileSize $trayBin))
 
 Step "Building installer (Inno Setup)"
 $null = New-Item -ItemType Directory -Force -Path $OutDir
-& $iscc $IssScript "/DMyAppVersion=$Version" "/O$OutDir" "/FEasyUniVPNSetup"
+& $iscc $IssScript "/DMyAppVersion=$Version" "/O$OutDir" "/FEasyUniVPNSetup-$Version"
 if ($LASTEXITCODE -ne 0) { Die "ISCC.exe failed - check the output above for details." }
 
-$setupBin = "$OutDir\EasyUniVPNSetup.exe"
+$setupBin = "$OutDir\EasyUniVPNSetup-$Version.exe"
 if (-not (Test-Path $setupBin)) { Die "Installer not found at $setupBin" }
-Write-Host ("  OK   EasyUniVPNSetup.exe     {0}" -f (FileSize $setupBin))
+Write-Host ("  OK   EasyUniVPNSetup-$Version.exe     {0}" -f (FileSize $setupBin))
 
 # ── summary ───────────────────────────────────────────────────────────────────
 
@@ -165,6 +165,6 @@ Write-Host ""
 Write-Host "Build complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Distributable:" -ForegroundColor White
-Write-Host ("  EasyUniVPNSetup.exe   {0}   (share this)" -f (FileSize $setupBin))
+Write-Host ("  EasyUniVPNSetup-$Version.exe   {0}   (share this)" -f (FileSize $setupBin))
 Write-Host ""
-Write-Host "To install: run dist\EasyUniVPNSetup.exe" -ForegroundColor Yellow
+Write-Host "To install: run dist\EasyUniVPNSetup-$Version.exe" -ForegroundColor Yellow

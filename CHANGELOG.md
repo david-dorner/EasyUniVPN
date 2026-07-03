@@ -4,6 +4,13 @@ All notable changes to EasyUniVPN are documented here. The version number of
 the latest entry must match the `VERSION` file - the release workflow reads
 both to build and publish a GitHub release automatically.
 
+## 1.0.4 - 2026-07-03
+
+- The installer download is now named EasyUniVPNSetup-\<version\>.exe, so a
+  downloaded file identifies its version at a glance
+- The installer exe's file properties (FileVersion/ProductVersion) now carry
+  the version as well
+
 ## 1.0.3 - 2026-07-03
 
 Smarter installer when EasyUniVPN is already installed.

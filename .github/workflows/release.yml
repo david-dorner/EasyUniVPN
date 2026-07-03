@@ -3,8 +3,9 @@
 # On every push to main, this workflow reads the VERSION file. If no git tag
 # v{VERSION} exists yet, it builds the installer completely from scratch
 # (which doubles as a build test), extracts the matching section from
-# CHANGELOG.md, and publishes a GitHub release with EasyUniVPNSetup.exe
-# attached. Pushing ordinary commits without bumping VERSION never releases.
+# CHANGELOG.md, and publishes a GitHub release with the version-named
+# installer (EasyUniVPNSetup-x.y.z.exe) attached. Pushing ordinary commits
+# without bumping VERSION never releases.
 #
 # To publish a release: bump VERSION (plus the two mirrors build.ps1 checks -
 # cli/src/easyunivpn/__init__.py and launcher/Cargo.toml), add a matching
@@ -96,4 +97,4 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: EasyUniVPN ${{ steps.version.outputs.version }}
           body_path: release-notes.md
-          files: dist/EasyUniVPNSetup.exe
+          files: dist/EasyUniVPNSetup-*.exe

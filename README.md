@@ -33,7 +33,7 @@ You set it up once, and from then on connecting is: right-click the tray icon
 
 ## Installation
 
-1. Download **EasyUniVPNSetup.exe** from the
+1. Download the installer (**EasyUniVPNSetup-\<version\>.exe**) from the
    [latest release](https://github.com/david-dorner/EasyUniVPN/releases/latest).
 2. Run it. Windows SmartScreen may warn about an unrecognized app (the
    installer is not code-signed). Click **More info → Run anyway**.
@@ -152,7 +152,7 @@ pwsh              # make sure you're in PowerShell 7, not Windows PowerShell
 .\build.ps1
 ```
 
-The finished installer lands in `dist\EasyUniVPNSetup.exe`.
+The finished installer lands in `dist\EasyUniVPNSetup-<version>.exe`.
 
 **Running the tests:** copy `tests\.env.example` to `tests\.env`, fill in
 credentials, then run `tests\Run-Tests.ps1`. Details - and everything else

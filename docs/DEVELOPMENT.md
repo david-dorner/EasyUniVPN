@@ -285,7 +285,7 @@ network failures and streams output to the installer log memo.
 ```powershell
 pwsh          # build.ps1 needs PowerShell 7, not Windows PowerShell 5.1
 cd EasyUniVPN
-.\build.ps1   # → dist\EasyUniVPNSetup.exe
+.\build.ps1   # → dist\EasyUniVPNSetup-<version>.exe
 ```
 
 The script cleans all previous artifacts, then builds in order: Python CLI
@@ -353,7 +353,7 @@ dumps the server's page text so new rejection signals can be added to
 3. Extracts the matching `## {VERSION}` section from `CHANGELOG.md` as the
    release notes.
 4. Creates git tag `v{VERSION}` and a GitHub release with
-   `EasyUniVPNSetup.exe` attached.
+   `EasyUniVPNSetup-{VERSION}.exe` attached.
 
 So publishing a release is exactly: bump the version files, write the
 changelog entry, push to `main`.

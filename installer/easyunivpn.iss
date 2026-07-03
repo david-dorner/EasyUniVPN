@@ -6,6 +6,13 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0-dev"
 #endif
+; VersionInfoVersion (the exe's FileVersion resource) only accepts numeric
+; x.y.z.w values, so the "-dev" placeholder needs a numeric stand-in.
+#if MyAppVersion == "0.0.0-dev"
+  #define MyAppFileVersion "0.0.0.0"
+#else
+  #define MyAppFileVersion MyAppVersion
+#endif
 #define MyAppPublisher "EasyUniVPN"
 #define MyAppURL "https://github.com/david-dorner/EasyUniVPN"
 ; Config-format version this app understands - keep in sync with
@@ -32,7 +39,8 @@ DisableProgramGroupPage=yes
 DisableDirPage=no
 UsePreviousTasks=no
 OutputDir=..\dist
-OutputBaseFilename=EasyUniVPNSetup
+OutputBaseFilename=EasyUniVPNSetup-{#MyAppVersion}
+VersionInfoVersion={#MyAppFileVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
