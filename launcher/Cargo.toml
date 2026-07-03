@@ -1,0 +1,32 @@
+[package]
+# Keep version in sync with the VERSION file at the repository root - build.ps1
+# verifies the two match and fails the build on drift.
+name = "launcher"
+version = "1.0.0"
+edition = "2021"
+description = "EasyUniVPN launcher - tiny native binary that handles UAC elevation and spawns the tray app"
+license = "GPL-3.0-or-later"
+
+[[bin]]
+name = "EasyUniVPNLauncher"
+path = "src/main.rs"
+
+[build-dependencies]
+winres = "0.1"
+
+[dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# Release profile: smallest possible binary
+[profile.release]
+opt-level   = "z"     # optimize for size
+lto         = true    # cross-crate inlining
+codegen-units = 1     # single codegen unit for better LTO
+strip       = true    # strip debug symbols
+panic       = "abort" # no unwinding machinery

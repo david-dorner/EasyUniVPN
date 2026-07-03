@@ -1,0 +1,1 @@
+"""Windows tray application."""

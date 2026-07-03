@@ -1,0 +1,99 @@
+# Automatic release pipeline.
+#
+# On every push to main, this workflow reads the VERSION file. If no git tag
+# v{VERSION} exists yet, it builds the installer completely from scratch
+# (which doubles as a build test), extracts the matching section from
+# CHANGELOG.md, and publishes a GitHub release with EasyUniVPNSetup.exe
+# attached. Pushing ordinary commits without bumping VERSION never releases.
+#
+# To publish a release: bump VERSION (plus the two mirrors build.ps1 checks -
+# cli/src/easyunivpn/__init__.py and launcher/Cargo.toml), add a matching
+# "## x.y.z" section to CHANGELOG.md, and push to main.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read VERSION and check whether it is already released
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "VERSION must contain a semantic version (x.y.z), got '$version'"
+            exit 1
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          git ls-remote --exit-code --tags origin "refs/tags/v$version" | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Tag v$version already exists - nothing to release."
+            "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "Tag v$version not found - building release."
+            "exists=false" >> $env:GITHUB_OUTPUT
+          }
+          # The Actions pwsh wrapper fails the step on a non-zero trailing
+          # $LASTEXITCODE - which git ls-remote legitimately leaves behind
+          # when the tag does not exist yet. End the step successfully.
+          exit 0
+
+      - name: Set up Python 3.12
+        if: steps.version.outputs.exists == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup 6
+        if: steps.version.outputs.exists == 'false'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      # Rust (stable) and the .NET SDK with the .NET Framework 4.8 targeting
+      # pack are preinstalled on the windows-latest runner image.
+      - name: Build installer from scratch
+        if: steps.version.outputs.exists == 'false'
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Extract release notes from CHANGELOG.md
+        if: steps.version.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $lines = Get-Content CHANGELOG.md
+          $notes = [System.Collections.Generic.List[string]]::new()
+          $inSection = $false
+          foreach ($line in $lines) {
+            if ($line -match "^##\s+$([regex]::Escape($version))\b") { $inSection = $true; continue }
+            if ($inSection -and $line -match '^##\s+') { break }
+            if ($inSection) { $notes.Add($line) }
+          }
+          $body = ($notes -join "`n").Trim()
+          if (-not $body) {
+            Write-Host "No CHANGELOG.md section found for $version - using a default body."
+            $body = "EasyUniVPN $version"
+          }
+          Set-Content release-notes.md $body -Encoding utf8
+
+      - name: Create GitHub release
+        if: steps.version.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: EasyUniVPN ${{ steps.version.outputs.version }}
+          body_path: release-notes.md
+          files: dist/EasyUniVPNSetup.exe

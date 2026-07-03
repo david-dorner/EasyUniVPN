@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- .NET Framework 4.8 ships with every Windows 10/11 machine - no download needed. -->
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>EasyUniVPN</AssemblyName>
+    <RootNamespace>EasyUniVPN</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- x64 so P/Invoke sizes (HANDLE, pointer) match what we pass -->
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Version comes from the VERSION file at the repository root - the single
+         source of truth. build.ps1 passes it as -p:Version; 1.0.0 is only the
+         fallback for bare "dotnet build" runs. -->
+    <Version Condition="'$(Version)' == ''">1.0.0</Version>
+    <Product>EasyUniVPN</Product>
+    <Copyright>EasyUniVPN contributors - GPL-3.0-or-later</Copyright>
+    <!-- Explicitly disable WPF to prevent the SDK from including WPF native DLLs
+         (D3DCompiler, wpfgfx, PresentationNative) in the publish output.
+         We use WinForms only; WPF components are not needed. -->
+    <UseWPF>false</UseWPF>
+    <!-- Embed the app icon so Explorer / taskbar show the correct icon -->
+    <ApplicationIcon>..\assets\app-icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!--
+    The .NET SDK includes WPF native renderer DLLs in the net48 WinForms publish output
+    even though .NET Framework 4.8 uses GDI+/GDI (not WPF DirectX) for WinForms rendering.
+    Remove them after publish so the installer payload only contains the app exe.
+    If users report a crash (DLL not found), put them back by removing this target.
+  -->
+  <Target Name="RemoveUnnecessaryNativeDlls" AfterTargets="Publish">
+    <Delete Files="
+      $(PublishDir)D3DCompiler_47_cor3.dll;
+      $(PublishDir)PenImc_cor3.dll;
+      $(PublishDir)PresentationNative_cor3.dll;
+      $(PublishDir)vcruntime140_cor3.dll;
+      $(PublishDir)wpfgfx_cor3.dll" />
+  </Target>
+
+</Project>
