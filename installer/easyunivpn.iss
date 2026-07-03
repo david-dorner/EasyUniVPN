@@ -1,8 +1,10 @@
 #define MyAppName "EasyUniVPN"
 ; Version comes from the VERSION file at the repository root - build.ps1 passes
-; it as /DMyAppVersion. The fallback below only applies to bare ISCC runs.
+; it as /DMyAppVersion on every real build (local and CI). The placeholder
+; below is only ever used when compiling this script directly with bare ISCC,
+; and is deliberately not a real version so such a build is recognizable.
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
+  #define MyAppVersion "0.0.0-dev"
 #endif
 #define MyAppPublisher "EasyUniVPN"
 #define MyAppURL "https://github.com/david-dorner/EasyUniVPN"
