@@ -24,6 +24,9 @@ from common.paths import app_config_path
 # fields would otherwise break reading a config.json written by an older
 # version (e.g. a rename or a type change - a plain added/removed field is
 # already handled below without needing a version bump).
+# When bumping, also update SupportedConfigVersion in installer/easyunivpn.iss
+# so the installer can warn before a downgrade that would not understand the
+# saved settings.
 CONFIG_VERSION = 1
 
 

@@ -4,6 +4,18 @@ All notable changes to EasyUniVPN are documented here. The version number of
 the latest entry must match the `VERSION` file - the release workflow reads
 both to build and publish a GitHub release automatically.
 
+## 1.0.3 - 2026-07-03
+
+Smarter installer when EasyUniVPN is already installed.
+
+- The installer now detects an existing installation and offers a clear
+  choice: continue (update, repair, or downgrade depending on the versions)
+  or uninstall EasyUniVPN instead
+- Updates keep saved credentials, the VPN profile, and settings; this was
+  already the case but is now stated explicitly at every step
+- Downgrading warns when the saved settings were written in a newer format
+  than the older version understands (tracked via the config_version field)
+
 ## 1.0.2 - 2026-07-03
 
 Reliability: one-time codes no longer depend on the system clock being right.

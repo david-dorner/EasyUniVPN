@@ -48,6 +48,11 @@ You set it up once, and from then on connecting is: right-click the tray icon
    typos are caught immediately. Done! The tray icon appears and you can
    connect.
 
+**Updating:** just download and run the newer installer - it updates the
+existing installation in place and keeps your credentials and settings. When
+an installation already exists, the installer also offers to repair or
+uninstall instead.
+
 ---
 
 ## Getting your TOTP secret (one-time step)

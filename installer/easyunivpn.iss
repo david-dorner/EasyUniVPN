@@ -8,6 +8,10 @@
 #endif
 #define MyAppPublisher "EasyUniVPN"
 #define MyAppURL "https://github.com/david-dorner/EasyUniVPN"
+; Config-format version this app understands - keep in sync with
+; CONFIG_VERSION in cli\src\common\app_config.py. Used to warn when
+; downgrading to a version that may not read the currently saved settings.
+#define SupportedConfigVersion 1
 #define MyAppExeName "EasyUniVPNCli.exe"
 #define MyAppLauncherExeName "EasyUniVPNLauncher.exe"
 #define MyAppTrayExeName "EasyUniVPN.exe"
@@ -146,26 +150,148 @@ begin
   Result := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1';
 end;
 
-function InitializeSetup(): Boolean;
+// Reads the next '.'-separated component of a version string, advancing Index.
+// Non-numeric trailing text (e.g. the "-dev" of a placeholder build) counts as 0.
+function NextVersionPart(const S: String; var Index: Integer): Integer;
+var
+  Part: String;
 begin
+  Part := '';
+  while (Index <= Length(S)) and (S[Index] <> '.') do begin
+    Part := Part + S[Index];
+    Index := Index + 1;
+  end;
+  if (Index <= Length(S)) and (S[Index] = '.') then
+    Index := Index + 1;
+  Result := StrToIntDef(Part, 0);
+end;
+
+// Numeric x.y.z comparison: 1 when A > B, -1 when A < B, 0 when equal.
+function CompareVersions(const A, B: String): Integer;
+var
+  IA, IB, PA, PB, Step: Integer;
+begin
+  Result := 0;
+  IA := 1;
+  IB := 1;
+  for Step := 1 to 4 do begin
+    PA := NextVersionPart(A, IA);
+    PB := NextVersionPart(B, IB);
+    if PA > PB then begin Result := 1; exit; end;
+    if PA < PB then begin Result := -1; exit; end;
+  end;
+end;
+
+// The config_version recorded in the user's saved settings, mirroring
+// CONFIG_VERSION in cli\src\common\app_config.py. Returns 0 when no setup
+// exists; a config.json without the field predates versioning and counts as 1.
+function InstalledConfigVersion(): Integer;
+var
+  Path, S, Num: String;
+  Data: AnsiString;
+  P: Integer;
+begin
+  Result := 0;
+  Path := ExpandConstant('{userappdata}\EasyUniVPN\config.json');
+  if not FileExists(Path) then
+    exit;
+  Data := '';
+  if not LoadStringFromFile(Path, Data) then
+    exit;
+  S := String(Data);
+  P := Pos('"config_version"', S);
+  if P = 0 then begin
+    Result := 1;
+    exit;
+  end;
+  P := P + Length('"config_version"');
+  while (P <= Length(S)) and ((S[P] = ' ') or (S[P] = ':')) do
+    P := P + 1;
+  Num := '';
+  while (P <= Length(S)) and (S[P] >= '0') and (S[P] <= '9') do begin
+    Num := Num + S[P];
+    P := P + 1;
+  end;
+  Result := StrToIntDef(Num, 1);
+end;
+
+// Launches the existing installation's uninstaller and waits for it.
+procedure RunExistingUninstaller();
+var
+  UninstallCmd: String;
+  ResultCode: Integer;
+begin
+  if RegQueryStringValue(HKLM, UninstallRegistryKey(), 'UninstallString', UninstallCmd) then
+    Exec(RemoveQuotes(UninstallCmd), '', '', SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode)
+  else
+    MsgBox('Could not locate the uninstaller for the existing installation.', mbError, MB_OK);
+end;
+
+// When an installation already exists, offer Continue (update/repair/downgrade),
+// Uninstall, or Cancel - and warn when downgrading below the version that wrote
+// the currently saved settings format.
+function InitializeSetup(): Boolean;
+var
+  Cmp, CfgVer, Choice: Integer;
+  Instruction, Detail: String;
+begin
+  Result := True;
   if not RegQueryStringValue(HKLM, UninstallRegistryKey(), 'DisplayVersion', PreviousVersion) then
     PreviousVersion := '';
-  Result := True;
+  if (PreviousVersion = '') or WizardSilent then
+    exit;
+
+  Cmp := CompareVersions('{#MyAppVersion}', PreviousVersion);
+  if Cmp > 0 then begin
+    Instruction := 'EasyUniVPN ' + PreviousVersion + ' is already installed.';
+    Detail := 'Continue to update it to version {#MyAppVersion}. ' +
+              'Your saved credentials, VPN profile, and settings are kept.';
+  end else if Cmp = 0 then begin
+    Instruction := 'EasyUniVPN {#MyAppVersion} is already installed.';
+    Detail := 'Continue to repair this installation. Anything missing or damaged is ' +
+              'restored; your saved credentials and settings are kept.';
+  end else begin
+    Instruction := 'A newer EasyUniVPN (' + PreviousVersion + ') is already installed.';
+    Detail := 'Continue to downgrade it to version {#MyAppVersion}. ' +
+              'Your saved credentials and settings are kept.';
+    CfgVer := InstalledConfigVersion();
+    if CfgVer > {#SupportedConfigVersion} then
+      Detail := Detail + #13#10 + #13#10 +
+        'Warning: your settings were saved in a newer format (version ' + IntToStr(CfgVer) +
+        ') than this release understands (version {#SupportedConfigVersion}). ' +
+        'After downgrading you may have to run setup again.';
+  end;
+
+  Choice := TaskDialogMsgBox(Instruction,
+      Detail + #13#10 + #13#10 + 'Or choose Uninstall to remove EasyUniVPN from this computer.',
+      mbConfirmation, MB_YESNOCANCEL, ['&Continue', '&Uninstall'], 0);
+  if Choice = IDNO then begin
+    RunExistingUninstaller();
+    Result := False;
+  end else if Choice <> IDYES then
+    Result := False;
 end;
 
 procedure InitializeWizard();
 begin
   if PreviousVersion <> '' then begin
-    if PreviousVersion = '{#MyAppVersion}' then
-      WizardForm.WelcomeLabel2.Caption :=
-        'This will repair the existing EasyUniVPN ' + PreviousVersion + ' installation, ' +
-        're-downloading anything missing without touching your saved credentials or settings.' + #13#10 + #13#10
-        + WizardForm.WelcomeLabel2.Caption
-    else
-      WizardForm.WelcomeLabel2.Caption :=
-        'This will update EasyUniVPN ' + PreviousVersion + ' to {#MyAppVersion}. ' +
-        'Your saved credentials, VPN profile, and settings are kept as-is.' + #13#10 + #13#10
-        + WizardForm.WelcomeLabel2.Caption;
+    case CompareVersions('{#MyAppVersion}', PreviousVersion) of
+      0:
+        WizardForm.WelcomeLabel2.Caption :=
+          'This will repair the existing EasyUniVPN ' + PreviousVersion + ' installation, ' +
+          're-downloading anything missing without touching your saved credentials or settings.' + #13#10 + #13#10
+          + WizardForm.WelcomeLabel2.Caption;
+      1:
+        WizardForm.WelcomeLabel2.Caption :=
+          'This will update EasyUniVPN ' + PreviousVersion + ' to {#MyAppVersion}. ' +
+          'Your saved credentials, VPN profile, and settings are kept as-is.' + #13#10 + #13#10
+          + WizardForm.WelcomeLabel2.Caption;
+      -1:
+        WizardForm.WelcomeLabel2.Caption :=
+          'This will downgrade EasyUniVPN ' + PreviousVersion + ' to {#MyAppVersion}. ' +
+          'Your saved credentials, VPN profile, and settings are kept as-is.' + #13#10 + #13#10
+          + WizardForm.WelcomeLabel2.Caption;
+    end;
   end;
 
   BootstrapLogMemo := TNewMemo.Create(WizardForm);

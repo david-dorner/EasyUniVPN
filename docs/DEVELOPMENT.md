@@ -228,6 +228,17 @@ directory - the test suite uses this to isolate every test run.
 
 `installer/easyunivpn.iss` (Inno Setup 6):
 
+- **Update / repair / downgrade / uninstall** - the fixed `AppId` makes any
+  install over an existing one an in-place operation; the installer never
+  touches `%APPDATA%` or Credential Manager, so credentials and settings
+  survive every update. When an existing installation is detected,
+  `InitializeSetup` shows a Continue/Uninstall/Cancel choice, words the
+  welcome page per direction (update, repair, or downgrade), and on
+  downgrades compares the `config_version` in the user's `config.json`
+  against `SupportedConfigVersion` (kept in sync with `CONFIG_VERSION` in
+  `app_config.py`) to warn when the saved settings format is newer than the
+  target version understands. Forward migrations happen in-app via
+  `app_config._migrate()` on first load, never in the installer.
 - **Process shutdown before copy** - running instances hold file locks;
   `CloseApplications` plus explicit `taskkill` in `CurStepChanged(ssInstall)`
   guarantee the new binaries actually replace the old ones.
