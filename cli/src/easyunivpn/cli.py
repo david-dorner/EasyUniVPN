@@ -16,7 +16,13 @@ import sys
 import textwrap
 import time
 
-from common.app_config import app_config_path, configuration_exists, load_app_config
+from common.app_config import (
+    KFU_MODE_TOTP,
+    KFU_MODE_VPN,
+    app_config_path,
+    configuration_exists,
+    load_app_config,
+)
 from common.elevation import is_admin, relaunch_path_as_admin
 from common.launch import launcher_invocation_args
 from common.logger import configure as configure_logging
@@ -115,10 +121,29 @@ def _start_tray(verbose: bool = False) -> int:
     return 1
 
 
+def _tray_running() -> bool:
+    """True when the tray process is currently running. The running tray
+    picks up config changes on its own, so setup flows skip the
+    'start now?' prompt instead of offering to start a second instance."""
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq EasyUniVPN.exe", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "easyunivpn.exe" in result.stdout.lower()
+
+
 def _offer_to_launch(verbose: bool) -> int:
     """Ask before starting the tray after setup finishes - in every context
     (unelevated shell, already-elevated shell, or the installer's own
-    elevated post-install run)."""
+    elevated post-install run). Skipped when the tray is already running."""
+    if _tray_running():
+        logger.info("EasyUniVPN is already running - your changes are applied automatically.")
+        return 0
     answer = input("Start EasyUniVPN now? [Y/n]: ").strip().lower()
     if answer in ("n", "no"):
         return 0
@@ -138,22 +163,27 @@ def _format_duration(seconds: float) -> str:
 
 def status(verbose: bool = False) -> int:
     cfg = load_app_config()
-    if not cfg.setup_complete or not cfg.email:
+    if not configuration_exists():
         logger.info("Not set up yet - run 'EasyUniVPN setup'.")
         return 0
 
-    logger.info("Registered email: %s", cfg.email)
-    connected = is_connected()
-    logger.info("VPN: %s", "Connected" if connected else "Disconnected")
+    if cfg.kfu_mode == KFU_MODE_VPN:
+        logger.info("Registered email: %s", cfg.email)
+        connected = is_connected()
+        logger.info("VPN: %s", "Connected" if connected else "Disconnected")
 
-    if connected:
-        started = session_started_at()
-        if started is not None:
-            since = datetime.datetime.fromtimestamp(started)
-            logger.info("Connected since: %s", since.strftime("%Y-%m-%d %H:%M:%S"))
-            logger.info("Session duration: %s", _format_duration(time.time() - started))
-        else:
-            logger.info("Connected since: unknown (session predates this EasyUniVPN version)")
+        if connected:
+            started = session_started_at()
+            if started is not None:
+                since = datetime.datetime.fromtimestamp(started)
+                logger.info("Connected since: %s", since.strftime("%Y-%m-%d %H:%M:%S"))
+                logger.info("Session duration: %s", _format_duration(time.time() - started))
+            else:
+                logger.info("Connected since: unknown (session predates this EasyUniVPN version)")
+    elif cfg.kfu_mode == KFU_MODE_TOTP:
+        logger.info("University of Graz: one-time codes only (no VPN).")
+    if cfg.tu_enabled:
+        logger.info("TU Graz: one-time codes configured.")
 
     if verbose:
         logger.info("Windows autostart: %s", "enabled" if is_startup_enabled() else "disabled")
@@ -165,13 +195,12 @@ def status(verbose: bool = False) -> int:
 
 
 def reset(verbose: bool = False, prompt: bool = True) -> int:
-    import contextlib
-    import keyring
+    from common.totp import delete_totp_secret
 
     logger.info("Resetting EasyUniVPN...")
     remove_profile()
-    with contextlib.suppress(Exception):
-        keyring.delete_password("EasyUniVPN", "totp_secret")
+    delete_totp_secret("kfu")
+    delete_totp_secret("tu")
     shutil.rmtree(app_config_path().parent, ignore_errors=True)
     disable_startup()
     logger.info("Configuration reset complete. Saved credentials, profile, and settings were removed.")
@@ -196,10 +225,13 @@ _EPILOG = textwrap.dedent(
     """\
     Commands:
       (none)             Start the tray icon. Runs first-time setup automatically
-                          if no profile exists yet.
-      setup              Run the interactive setup wizard the first time. If a
-                          profile already exists, opens a console menu instead
-                          (change password/email/TOTP, toggle autostart, reset).
+                          if nothing is set up yet.
+      setup              Run the interactive setup wizard the first time
+                          (University of Graz VPN or one-time codes, TU Graz
+                          one-time codes, or both). Once something is set up,
+                          opens a console menu instead (change credentials or
+                          TOTP secrets, add the other university, change
+                          quick-paste shortcuts, toggle autostart, reset).
       status             Show the registered email, VPN connection status,
                           connect time, and session duration.
       reset              Remove all saved credentials, the VPN profile, and the
@@ -207,6 +239,8 @@ _EPILOG = textwrap.dedent(
       change-password    Re-prompt for and update only the saved password.
       change-email       Re-prompt for and update only the saved university email.
       change-totp        Re-prompt for and update only the saved TOTP secret.
+                          Add --university tu for the TU Graz secret (the
+                          default is kfu, University of Graz).
       autostart on|off   Enable or disable launching EasyUniVPN at Windows logon.
       autostart status   Show whether autostart is currently enabled.
 
@@ -285,6 +319,12 @@ def _build_parser() -> argparse.ArgumentParser:
     change_totp.add_argument("--skip-validation", action="store_true", help=argparse.SUPPRESS)
     change_totp.add_argument("--force", "-f", action="store_true", help=_force_help)
     change_totp.add_argument("--new-totp", dest="new_totp", help=argparse.SUPPRESS)
+    change_totp.add_argument(
+        "--university",
+        choices=["kfu", "tu"],
+        default="kfu",
+        help="Which university's secret to change: kfu (University of Graz, default) or tu (TU Graz).",
+    )
 
     autostart = sub.add_parser(
         "autostart", parents=[verbosity], help="Enable or disable launching EasyUniVPN at Windows logon."
@@ -346,7 +386,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.command == "setup":
-        if configuration_exists() and profile_exists():
+        # Anything already configured (VPN or code-only, either university)
+        # opens the management menu instead of the first-time wizard.
+        if configuration_exists():
             return run_manage_menu(verbose=args.verbose)
         if run_console_setup(skip_test=args.skip_validation, verbose=args.verbose) != 0:
             return 1
@@ -374,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_change_totp(
             verbose=args.verbose, skip_test=args.skip_validation, force=args.force,
             new_totp=getattr(args, "new_totp", None),
+            university=getattr(args, "university", "kfu"),
         )
 
     if args.command == "autostart":
@@ -390,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.info("Windows autostart disabled.")
         return 0
 
-    if not configuration_exists() or not profile_exists():
+    if not configuration_exists():
         logger.info("No existing setup found - starting first-time setup.")
         if run_console_setup(skip_test=False, verbose=args.verbose) != 0:
             return 1

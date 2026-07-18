@@ -18,7 +18,7 @@
 ; Config-format version this app understands - keep in sync with
 ; CONFIG_VERSION in cli\src\common\app_config.py. Used to warn when
 ; downgrading to a version that may not read the currently saved settings.
-#define SupportedConfigVersion 1
+#define SupportedConfigVersion 2
 #define MyAppExeName "EasyUniVPNCli.exe"
 #define MyAppLauncherExeName "EasyUniVPNLauncher.exe"
 #define MyAppTrayExeName "EasyUniVPN.exe"
@@ -66,7 +66,8 @@ Source: "..\tray\bin\publish\{#MyAppTrayExeName}";        DestDir: "{app}"; Flag
 Source: "..\tray\bin\publish\{#MyAppTrayExeName}.config"; DestDir: "{app}"; Flags: ignoreversion
 ; Python CLI bundle - handles setup wizard, bootstrap, reset, and autostart
 Source: "..\cli\build\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-; App icon + four VPN state PNGs used by the system tray
+; App icon + Lucide icon sources and license (the tray glyphs themselves are
+; rendered from vector data embedded in EasyUniVPN.exe - see tray\LucideIcons.cs)
 Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; Pre-built openconnect VPN client (statically linked, no extra runtime needed)
 Source: "..\runtime\openconnect\*"; DestDir: "{app}\runtime\openconnect"; Flags: recursesubdirs createallsubdirs ignoreversion

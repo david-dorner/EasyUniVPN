@@ -10,8 +10,8 @@ You set it up once, and from then on connecting is: right-click the tray icon
 
 > **Unofficial software.** EasyUniVPN is an independent project. It is
 > **not affiliated with, endorsed by, or supported by the University of
-> Graz**. If it breaks, ask here (GitHub issues), not the university's IT
-> support. Use at your own risk.
+> Graz or TU Graz**. If it breaks, ask here (GitHub issues), not the
+> universities' IT support. Use at your own risk.
 
 ---
 
@@ -20,9 +20,15 @@ You set it up once, and from then on connecting is: right-click the tray icon
 - **One-click connect/disconnect** from the system tray
 - **Fully automatic sign-in** - your uniLOGIN username, password, *and*
   the 6-digit one-time code are handled for you in the background
-- **Ctrl+Alt+V pastes your current one-time code anywhere** - logging in
-  to UNIGRAZonline, Moodle, or uniLOGIN in a browser? Press Ctrl+Alt+V in the
-  code field and the current 6-digit code is typed for you
+- **Quick-paste shortcut types your current one-time code anywhere** -
+  logging in to UNIGRAZonline, Moodle, or uniLOGIN in a browser? Press your
+  chosen shortcut (Ctrl+Alt+V by default) in the code field and the current
+  code is typed for you, without losing what was on your clipboard
+- **TU Graz one-time codes work too!** - studying at TU Graz?
+  EasyUniVPN also generates TU Graz codes (no TU Graz VPN support), with its own
+  quick-paste shortcut and a **Copy OTP** entry in the tray menu for both
+- **Codes-only mode** - don't want need VPN at all? Set up just the one-time
+  codes; EasyUniVPN then runs without ever asking for administrator rights
 - **Optional autostart** - have it ready in the tray every time Windows starts
 - **Notifications** when the VPN connects or disconnects
 - **Your credentials never leave your PC** except to the university's own
@@ -39,14 +45,21 @@ You set it up once, and from then on connecting is: right-click the tray icon
    installer is not code-signed). Click **More info → Run anyway**.
 3. The installer downloads a small runtime (~40 MB) during installation, so
    stay connected to the internet.
-4. When it finishes, a setup window opens and asks for three things:
+4. When it finishes, a setup window opens. It first asks which university
+   you want to set up: **University of Graz**, **TU Graz** (one-time codes
+   only), or **both**.
+5. For the University of Graz you choose between the **full VPN setup** or
+   **one-time codes only**. The full VPN setup asks for three things:
    - your **university email** (`...@edu.uni-graz.at` or `...@uni-graz.at`)
    - your **uniLOGIN password**
    - your **TOTP secret** - see the next section, this is the only step that
-     needs a little one-time effort
-5. EasyUniVPN checks your details against the university login right away, so
-   typos are caught immediately. Done! The tray icon appears and you can
-   connect.
+     needs a little one-time effort.
+   EasyUniVPN checks your details against the university login right away,
+   so typos are caught immediately. A codes-only setup (and TU Graz) just
+   needs the TOTP secret.
+6. Each university's setup ends with picking a **quick-paste shortcut** for
+   its one-time codes - Ctrl+Alt+V, Ctrl+Shift+V, your own combination, or
+   none. Done! The tray icon appears.
 
 **Updating:** just download and run the newer installer - it updates the
 existing installation in place and keeps your credentials and settings. When
@@ -59,22 +72,29 @@ uninstall instead.
 
 ### What is that?
 
-When you set up two-factor authentication for uniLOGIN, you scanned a **QR
-code** with an authenticator app (Google Authenticator, Studo, Aegis, …).
-That QR code contains a short text called the **secret**. It's the seed your
-app uses to generate a new 6-digit code every 30 seconds. The secret itself
-**never changes**. If EasyUniVPN knows it, it can generate the same codes as
-your phone and log you in automatically.
+When you set up two-factor authentication for your university account, you
+scanned a **QR code** with an authenticator app (Google Authenticator,
+Studo, Aegis, …). That QR code contains a short text called the **secret**.
+It's the seed your app uses to generate a fresh code every 30 seconds (60
+for TU Graz). The secret itself **never changes**. If EasyUniVPN knows it,
+it can generate the same codes as your phone and log you in automatically.
 
-Decoded, the QR code looks like this:
+Decoded, the University of Graz (uniLOGIN) QR code looks like this:
 
 ```
 otpauth://totp/uniLOGIN%3Aname.surname%40edu.uni-graz.at?secret=XXXXXXXXXXXXXXXX&algorithm=sha1&period=30&digits=6&issuer=uniLOGIN
 ```
 
-The part you need is the value after `secret=` and before the next `&` - a
-string of capital letters and digits (in this example, `XXXXXXXXXXXXXXXX`).
-That's your TOTP secret. Paste it into EasyUniVPN's setup when asked.
+and the TU Graz one like this:
+
+```
+otpauth://totp/ZID%20TU%20Graz%3ATOTPXXXXXXXX%20...?secret=XXXXXXXXXXXXXXXX&algorithm=sha256&period=60&digits=6&issuer=ZID%20TU%20Graz
+```
+
+You can paste the **whole `otpauth://...` text** into EasyUniVPN's setup -
+it picks out everything it needs. Or paste just the part after `secret=`
+and before the next `&`: a string of capital letters and digits (in these
+examples, `XXXXXXXXXXXXXXXX`).
 
 > **Treat the secret like a password.** Anyone who has it can generate
 > your one-time codes forever. Don't share it, don't post screenshots of the
@@ -84,7 +104,8 @@ That's your TOTP secret. Paste it into EasyUniVPN's setup when asked.
 
 **If you use the Studo app:** open the Studo OTP section, tap the **three
 dots (⋮)** next to your University of Graz OTP entry, and choose the option
-to **Export account as QR**. Take a screenshot of it.
+to **Export account as QR**. Take a screenshot of it. The same steps work
+for a TU Graz OTP entry.
 
 **If you still have the original QR code** (from when you first set up
 two-factor authentication, e.g. a printout or saved screenshot): use that.
@@ -114,7 +135,10 @@ the text.
 | I want to… | Do this |
 |---|---|
 | Connect / disconnect | Right-click the tray icon → **Connect** / **Disconnect** (icon turns green when connected) |
-| Paste a one-time code in any login form | Click into the code field, press **Ctrl+Alt+V** |
+| Paste a one-time code in any login form | Click into the code field, press your quick-paste shortcut (**Ctrl+Alt+V** unless you chose otherwise) |
+| Copy a one-time code | Right-click tray icon → **Copy OTP** → **Copy KFU OTP** or **Copy TU OTP** |
+| Add the other university later | Right-click tray icon → **Setup** → pick the "Set up …" option |
+| Change my quick-paste shortcuts | Right-click tray icon → **Setup** → *Change quick-paste shortcuts* - a running EasyUniVPN applies them immediately |
 | Start with Windows | Tick "Start EasyUniVPN with Windows" during install, or right-click tray icon → **Setup** to enter the setup where you can change any credentials or settings |
 | Change my password / email / TOTP secret | Right-click tray icon → **Setup** → pick the option from the menu |
 | Turn notifications on/off | Right-click tray icon → **Notifications** |
@@ -124,6 +148,10 @@ Notes:
 
 - Connecting needs administrator rights (creating a VPN network adapter is a
   Windows requirement), so you'll see one UAC prompt when EasyUniVPN starts.
+  Codes-only setups skip this entirely - no UAC prompt, ever.
+- If another VPN (NordVPN, Cloudflare WARP, Tailscale, …) is connected,
+  EasyUniVPN tells you to disconnect it first instead of hanging - the
+  university VPN cannot share the connection with it.
 - If you change your uniLOGIN password on the university site, update it in
   EasyUniVPN too: tray icon → **Setup** → *Change password*.
 - The very first connect right after setup can take a few seconds longer than
@@ -178,5 +206,5 @@ excellent [openconnect-saml](https://github.com/mschabhuettl/openconnect-saml)
 and [OpenConnect](https://www.infradead.org/openconnect/) projects - see
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for all attributions.
 
-*"University of Graz", "uniLOGIN", and "Studo" are trademarks of their
-respective owners and are used here only to describe compatibility.*
+*"University of Graz", "TU Graz", "uniLOGIN", and "Studo" are trademarks of
+their respective owners and are used here only to describe compatibility.*

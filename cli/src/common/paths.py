@@ -111,18 +111,6 @@ def assets_dir() -> Path:
     return app_root() / "assets"
 
 
-def icon_path(connected: bool, dark_mode: bool) -> Path | None:
-    """Pick the tray icon variant matching connection state and Windows theme.
-
-    Returns None if the expected file is missing, letting the caller fall back
-    to a drawn placeholder icon instead of crashing on a missing asset.
-    """
-    state = "on" if connected else "off"
-    tone = "white" if dark_mode else "black"
-    path = assets_dir() / f"vpn-{state}-{tone}.png"
-    return path if path.exists() else None
-
-
 def app_icon_path() -> Path:
     """The app's exe/installer icon."""
     return assets_dir() / "app-icon.ico"

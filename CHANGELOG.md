@@ -4,6 +4,47 @@ All notable changes to EasyUniVPN are documented here. The version number of
 the latest entry must match the `VERSION` file - the release workflow reads
 both to build and publish a GitHub release automatically.
 
+## 1.1.0 - 2026-07-18
+
+TU Graz one-time codes, configurable quick-paste shortcuts, VPN conflict
+detection, and sharp tray icons on every display scale.
+
+- TU Graz support: setup can now configure TU Graz one-time codes alongside
+  or instead of the University of Graz (TU services need no VPN, so it is
+  codes-only)
+- University of Graz can also be set up in a codes-only mode without the
+  VPN; codes-only setups run without administrator rights and show no UAC
+  prompt
+- New "Copy OTP" tray menu that copies the current University of Graz (KFU)
+  or TU Graz code to the clipboard
+- The quick-paste shortcut is now chosen during setup, per university:
+  Ctrl+Alt+V, Ctrl+Shift+V, a custom combination, or none - and the two
+  universities can never end up sharing a shortcut
+- Setup accepts a full otpauth:// link as the TOTP secret and reads the code
+  parameters from it (TU Graz codes use SHA-256 and rotate every 60 seconds)
+- Another active VPN (NordVPN, Cloudflare WARP, Tailscale, and similar) is
+  now detected before connecting or validating credentials, with clear
+  instructions instead of a silent hang
+- Quick paste no longer loses the previous clipboard contents: the original
+  clipboard is copied format by format and restored after the paste
+- Setup changes now apply to the running app immediately - new shortcuts,
+  an added or removed university, and even a reset take effect without
+  restarting (enabling the VPN on a codes-only install restarts the tray
+  automatically, with the usual administrator prompt)
+- Setup prompts accept plain Enter for the most likely answer (full VPN
+  setup, the recommended shortcut)
+- Setup no longer offers to start EasyUniVPN when it is already running
+- The tray menu now always opens away from the screen edge instead of
+  occasionally extending underneath the taskbar
+- New tray icons: Lucide shield glyphs (shield-check connected, shield-off
+  disconnected) rendered from vector data at the exact size the current
+  display scale needs - no more pixelated icon on high-resolution or scaled
+  screens
+- The tray icon tone now follows the taskbar theme (not the app theme) and
+  re-renders immediately when the Windows theme or display scaling changes
+- The shortcut chooser offers "Keep the current shortcut" when one is
+  already set, so re-running it changes nothing by accident
+
 ## 1.0.4 - 2026-07-03
 
 - The installer download is now named EasyUniVPNSetup-\<version\>.exe, so a

@@ -141,6 +141,63 @@ class VpnController:
         return False
 
 
+# Substrings (lowercase) that identify third-party VPN adapters by interface
+# name or driver description. Mirrors VpnAdapterHints in tray/VpnController.cs
+# - keep the two lists in sync. Deliberately broad: a false positive only
+# costs the user a confirmation, while a missed conflict means openconnect
+# hangs until its timeout with no explanation.
+_VPN_ADAPTER_HINTS = (
+    "nordvpn", "nordlynx", "cloudflare", "warp", "tailscale", "protonvpn",
+    "proton vpn", "expressvpn", "surfshark", "mullvad", "wireguard",
+    "openvpn", "tap-windows", "zerotier", "hamachi", "anyconnect",
+    "fortinet", "fortissl", "globalprotect", "pritunl", "windscribe",
+    "private internet access", "tunnelbear", "hotspot shield", "cyberghost",
+    "wan miniport",  # Windows built-in VPN connections (PPTP/L2TP/SSTP/IKEv2)
+)
+
+# Our own tunnel (and infrastructure interfaces) must never count as a conflict.
+_VPN_ADAPTER_IGNORE = ("uni-graz", "univpn", "teredo", "isatap", "loopback")
+
+
+def detect_conflicting_vpn() -> str | None:
+    """Name of a *connected* third-party VPN, or None when none is found.
+
+    Another VPN owning the default route makes openconnect's connection
+    attempt hang until its timeout with no useful error, so callers check
+    this before connecting or validating credentials against the SSO.
+
+    Detection is route-based, not adapter-based: VPN products keep their
+    virtual adapter "Up" even while disconnected (NordLynx, for example), so
+    the reliable signal is which interface owns the default route - either
+    0.0.0.0/0 itself or the 0.0.0.0/1 + 128.0.0.0/1 override pair VPNs
+    install to shadow it. An installed-but-idle VPN has no such routes.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "$routes = Get-NetRoute -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
+                "Where-Object { $_.DestinationPrefix -in @('0.0.0.0/0','0.0.0.0/1','128.0.0.0/1') }; "
+                "foreach ($r in $routes) { "
+                "$a = Get-NetAdapter -InterfaceIndex $r.InterfaceIndex -ErrorAction SilentlyContinue; "
+                "if ($a) { $a.Name + '|' + $a.InterfaceDescription } }",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            creationflags=CREATE_NO_WINDOW,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for line in result.stdout.splitlines():
+        lowered = line.lower()
+        if not line.strip() or any(skip in lowered for skip in _VPN_ADAPTER_IGNORE):
+            continue
+        if any(hint in lowered for hint in _VPN_ADAPTER_HINTS):
+            return line.split("|", 1)[0].strip() or line.strip()
+    return None
+
+
 def is_connected() -> bool:
     try:
         result = subprocess.run(

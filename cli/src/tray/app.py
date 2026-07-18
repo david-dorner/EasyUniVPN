@@ -27,7 +27,6 @@ from PIL import Image, ImageDraw
 from common.constants import VPN_SERVER
 from common.launch import self_invocation_args
 from common.logger import get_logger
-from common.paths import icon_path
 from common.vpn import (
     VpnController,
     disconnect_active_session,
@@ -68,11 +67,14 @@ def _dark_mode() -> bool:
 
 
 def _make_icon(connected: bool) -> Image.Image:
-    """Load a themed PNG or fall back to a drawn glyph."""
+    """Draw the dev-mode tray glyph.
+
+    The production C# tray renders Lucide shield icons from embedded vector
+    data at the exact size the current DPI needs (see tray/LucideIcons.cs);
+    this simple drawn placeholder only exists for `python -m easyunivpn`
+    development runs, which never ship to users.
+    """
     dark = _dark_mode()
-    themed = icon_path(connected=connected, dark_mode=dark)
-    if themed:
-        return Image.open(themed).convert("RGBA")
     fg = (245, 245, 245) if dark else (32, 32, 32)
     accent = (52, 168, 83) if connected else (190, 45, 45)
     image = Image.new("RGBA", (64, 64), (30, 30, 30, 0))

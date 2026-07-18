@@ -5,6 +5,13 @@ namespace EasyUniVPN;
 
 internal static class NativeMethods
 {
+    // ── routing ───────────────────────────────────────────────────────────
+
+    /// <summary>Index of the interface that would route traffic to destAddr
+    /// (IPv4 in network byte order). Returns 0 (NO_ERROR) on success.</summary>
+    [DllImport("iphlpapi.dll")]
+    internal static extern int GetBestInterface(uint destAddr, out uint bestIfIndex);
+
     // ── IP change notification (callback-based, no blocked thread) ───────
     // Callback signature per netioapi.h: PUNICAST_IPADDRESS_CHANGE_CALLBACK.
     // Row and NotificationType are unused by EasyUniVPN - any notification
@@ -29,6 +36,45 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool DestroyIcon(IntPtr hIcon);
+
+    // ── window activation ─────────────────────────────────────────────────
+    // Needed before manually showing the tray context menu: without
+    // foregrounding its window first, the menu does not dismiss when the
+    // user clicks elsewhere.
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    // ── DPI awareness ─────────────────────────────────────────────────────
+
+    private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (IntPtr)(-4);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetProcessDPIAware();
+
+    /// <summary>
+    /// Opts the process in to Per-Monitor-V2 DPI awareness (Windows 10
+    /// 1703+), falling back to system DPI awareness. Must run before any
+    /// window is created. Without this the process is DPI-unaware and
+    /// Windows bitmap-stretches everything it draws - including the tray
+    /// icon, which is exactly what makes it blurry on scaled displays.
+    /// </summary>
+    internal static void EnablePerMonitorDpiAwareness()
+    {
+        try
+        {
+            if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+                SetProcessDPIAware();
+        }
+        catch (EntryPointNotFoundException)
+        {
+            try { SetProcessDPIAware(); } catch { }
+        }
+    }
 
     // ── process creation ──────────────────────────────────────────────────
 

@@ -15,6 +15,17 @@ EasyUniVPN is a Windows system tray client for the University of Graz VPN
 submits the university credentials and a locally computed TOTP code, so no
 browser window ever opens.
 
+Beyond the VPN, EasyUniVPN manages one-time codes (TOTP) for up to two
+universities: University of Graz ("kfu" throughout the code; full VPN or
+codes-only) and TU Graz ("tu"; always codes-only - TU services need no VPN).
+Each configured university gets a tray "Copy OTP" entry and an optional
+global quick-paste shortcut. The two universities use different otpauth
+parameters (KFU: SHA-1/30 s, TU: SHA-256/60 s), so every TOTP path is
+parameterized by (algorithm, period, digits) - see `common/totp.py` and
+`tray/Totp.cs`. Codes-only setups (no VPN) run the tray unelevated: both the
+Rust launcher and the C# admin safety net skip elevation unless
+`kfu_mode == "vpn"`.
+
 The product is three cooperating executables plus an installer:
 
 ```
@@ -51,7 +62,7 @@ C:\Program Files\EasyUniVPN\
 ├── EasyUniVPNCli.exe        Python CLI (setup wizard, bootstrap, maintenance)
 ├── LICENSE                  GPL-3.0 license text
 ├── THIRD-PARTY-NOTICES.md   Third-party attributions
-├── assets\                  Tray icon PNGs (on/off × dark/light) + app icon
+├── assets\                  App icon + Lucide SVG sources (tray glyphs render from embedded vector data)
 ├── installer\
 │   ├── requirements.lock.txt   Pinned pip dependencies for the runtime
 │   └── assets\headless.py      Modified openconnect-saml headless authenticator
@@ -111,6 +122,21 @@ Two event sources drive transitions, both without polling:
 The transitioning states gray out the Connect/Disconnect menu item. The menu
 is rebuilt from scratch on every state change because WinForms (and Win32
 HMENU generally) caches item text.
+
+### Tray icons
+
+The icons are Lucide's `shield-check` (connected) and `shield-off`
+(disconnected) glyphs, ISC-licensed, embedded as SVG path data in
+`tray/LucideIcons.cs` alongside a small parser/renderer (moveto/lineto/
+cubic/arc subset). Each icon is stroked with GDI+ at the exact
+`SystemInformation.SmallIconSize` for the current DPI - never a scaled
+bitmap - and the process opts in to Per-Monitor-V2 DPI awareness at startup
+(`NativeMethods.EnablePerMonitorDpiAwareness`), which is what stops Windows
+from bitmap-stretching the icon on scaled displays. The glyph tone follows
+the taskbar theme (`SystemUsesLightTheme`), and the icon re-renders on
+`SystemEvents.UserPreferenceChanged`/`DisplaySettingsChanged` so theme and
+DPI switches take effect immediately. SVG sources and the upstream license
+live in `assets/lucide/`.
 
 ---
 
@@ -173,28 +199,38 @@ nothing secret is ever written to disk:
 | CredMan target | Written by | Read by |
 |---|---|---|
 | `openconnect-saml/{email}` (password) | `save_profile()` | openconnect-saml |
-| `openconnect-saml/totp/{email}` (TOTP secret) | `save_profile()` | openconnect-saml |
-| `EasyUniVPN/totp_secret` (TOTP secret copy) | `save_profile()` | C# tray (Ctrl+Alt+V paste) |
+| `openconnect-saml/totp/{email}` (KFU TOTP secret) | `save_profile()` | openconnect-saml |
+| `EasyUniVPN/totp_secret` (KFU TOTP secret copy) | `save_profile()` / `common.totp` | C# tray (quick paste, Copy OTP) |
+| `EasyUniVPN/totp_secret_tugraz` (TU TOTP secret) | `common.totp` | C# tray (quick paste, Copy OTP) |
 
 ---
 
-## 5. Ctrl+Alt+V OTP paste
+## 5. Quick-paste OTP shortcuts
 
 The tray installs a `WH_KEYBOARD_LL` hook (`HotkeyWindow.cs`) rather than
 `RegisterHotKey` - a low-level hook sees every physical keystroke regardless
-of which app owns the shortcut or has focus. On Ctrl+Alt+V:
+of which app owns the shortcut or has focus. Each configured university gets
+one binding (its `*_hotkey` from config.json); with no shortcuts configured
+the hook is not installed at all. When a binding's key and exact modifier
+set match:
 
 1. Injected events (from our own `SendInput`) are ignored via `LLMHF_INJECTED`.
 2. An `Interlocked.CompareExchange` guard drops re-triggers while a paste is
    in flight (a re-trigger would snapshot the OTP itself as "what to restore").
-3. A dedicated STA thread (OLE clipboard requirement) reads the TOTP secret
-   from Credential Manager, computes the RFC 6238 code (`Totp.cs`, HMAC-SHA1,
-   30 s period, 6 digits) at server-corrected time (`ServerClock.cs`, see the
-   authentication section), snapshots the clipboard, places the code on it,
-   and sends a genuine Ctrl+V via a single atomic `SendInput` batch -
-   releasing the still-held Ctrl and Alt keys first so the target app sees a
-   clean Ctrl+V.
-4. After 150 ms the original clipboard contents are restored.
+3. A dedicated STA thread (OLE clipboard requirement) reads that university's
+   TOTP secret from Credential Manager, computes the RFC 6238 code
+   (`Totp.cs`, parameterized HMAC/period/digits) at server-corrected time
+   (`ServerClock.cs`, see the authentication section), deep-copies the
+   current clipboard format by format (the `IDataObject` from
+   `Clipboard.GetDataObject` is only a live proxy that turns stale once the
+   clipboard changes - re-setting it restores nothing), places the code on
+   the clipboard, and sends a genuine Ctrl+V via a single atomic `SendInput`
+   batch - releasing the shortcut's still-held modifier keys first so the
+   target app sees a clean Ctrl+V.
+4. After 150 ms the copied original clipboard contents are restored.
+
+The tray's "Copy OTP" submenu uses the same per-university code computation
+but simply sets the clipboard (menu clicks run on the STA UI thread).
 
 ---
 
@@ -214,10 +250,67 @@ Manager - there is no IPC:
 | `{app}\runtime\_bootstrap_progress.txt` | bootstrap | installer (progress bar, `pct\|label`) |
 | `{app}\runtime\_bootstrap_log.txt` | bootstrap | installer (scrolling log memo) |
 
-`config.json` is version-tagged (`config_version`) with a migration hook in
-`cli/src/common/app_config.py` so future field renames stay backward
-compatible. The C# and Rust readers parse it with tolerant string matching to
+`config.json` is version-tagged (`config_version`, currently 2) with a
+migration hook in `cli/src/common/app_config.py` so future field renames
+stay backward compatible. Version 2 added the multi-university fields:
+`kfu_mode` ("vpn"/"totp"/"none"), `tu_enabled`, per-university quick-paste
+shortcuts (`kfu_hotkey`/`tu_hotkey`, canonical specs like "ctrl+alt+v", ""
+= disabled), and per-university otpauth parameters
+(`*_totp_algorithm`/`*_totp_period`/`*_totp_digits`). A v1 config
+(`setup_complete` but no `kfu_mode` key) means the full KFU VPN with the
+fixed Ctrl+Alt+V shortcut - the Python migration, the C# loader, and the
+Rust launcher all apply that same fallback, so an updated install behaves
+identically before the config is ever re-saved. The JSON deliberately stays
+flat: the C# and Rust readers parse it with tolerant string matching to
 avoid JSON library dependencies.
+
+Python flows always load-mutate-save the config, never construct it fresh -
+one university's setup or cancellation must not wipe the other's settings.
+
+### Quick-paste shortcuts
+
+A shortcut spec is 1-3 distinct modifiers out of ctrl/shift/alt plus exactly
+one regular key (letter, digit, or F1-F12), stored canonically lowercase
+("ctrl+alt+v"). The wizard's chooser (`_prompt_hotkey`) filters out the
+other university's shortcut from the recommendations and rejects it as a
+custom entry, so the two can never collide. The C# hook
+(`HotkeyWindow.TryParse` + exact modifier matching) fires the binding whose
+key AND exact modifier set match - "ctrl+alt+v" does not fire while Shift is
+also held.
+
+### Live config reload
+
+The tray polls config.json's write time every 2 seconds
+(`TrayApp.ReloadConfigIfChanged`) and applies setup-console changes to the
+running instance: shortcut changes re-register the keyboard hook,
+adding/removing a university updates the menu, disabling the VPN stops the
+monitors, and a reset (config gone) drops everything to the unconfigured
+state. Polling instead of FileSystemWatcher because reset deletes the whole
+config directory, which kills a watcher rooted in it. One transition cannot
+happen in-process: enabling the VPN while the tray runs unelevated
+(codes-only mode) - elevation cannot be gained after process start, so the
+tray exits with `RestartRequested` and Program.Main relaunches it via the
+launcher (normal UAC prompt) after the single-instance mutex is released.
+Setup flows in the CLI skip the "Start EasyUniVPN now?" prompt when the tray
+process is already running (`_tray_running()` via tasklist).
+
+### VPN conflict detection
+
+Another VPN owning the connection makes openconnect hang until its timeout
+with no useful error. Detection is route-based, not adapter-based: VPN
+products keep their virtual adapter "Up" even while disconnected (NordLynx,
+for example), so the reliable signal is which interface owns internet
+egress. `detect_conflicting_vpn()` (Python, used by the setup wizard before
+every validation attempt) asks Get-NetRoute which adapter holds
+`0.0.0.0/0` or the `0.0.0.0/1` + `128.0.0.0/1` override pair VPNs install;
+`VpnController.DetectConflictingVpn()` (C#, used before every tray Connect)
+asks `GetBestInterface` which adapter would route traffic to the internet.
+The owning interface is then matched against known VPN products by
+name/description keyword (plus PPP-type interfaces for Windows built-in
+VPNs), excluding our own tunnel. Keep the two hint lists in sync. The
+wizard loops "disconnect it, press Enter to check again" (with a 'skip'
+escape hatch for false positives); the tray shows a notification and aborts
+the connect.
 
 The `EASYUNIVPN_DATA_DIR` environment variable overrides the app-data
 directory - the test suite uses this to isolate every test run.

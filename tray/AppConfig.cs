@@ -40,7 +40,6 @@ internal static class AppPaths
 
     internal static string LauncherExe     => Path.Combine(InstallDir, "EasyUniVPNLauncher.exe");
     internal static string ConsoleExe      => Path.Combine(InstallDir, "EasyUniVPNCli.exe");
-    internal static string AssetsDir       => Path.Combine(InstallDir, "assets");
 
     // ── app-data paths (mirrors paths.py) ───────────────────────────────
 
@@ -54,66 +53,97 @@ internal static class AppPaths
     internal static string OcConfigPath      => Path.Combine(AppDataDir, "openconnect-saml", "config.toml");
     internal static string LogDir            => Path.Combine(AppDataDir, "logs");
 
-    // ── icon paths ───────────────────────────────────────────────────────
+    // ── theme ────────────────────────────────────────────────────────────
 
-    internal static string? TrayIconPath(bool connected)
-    {
-        bool dark = IsDarkMode();
-        string state = connected ? "on" : "off";
-        string tone  = dark ? "white" : "black";
-        string path  = Path.Combine(AssetsDir, $"vpn-{state}-{tone}.png");
-        return File.Exists(path) ? path : null;
-    }
-
-    internal static bool IsDarkMode()
+    /// <summary>
+    /// Whether the taskbar (where the tray icon lives) uses the dark theme.
+    /// The taskbar follows <c>SystemUsesLightTheme</c> - not
+    /// <c>AppsUseLightTheme</c>, which governs application windows and can
+    /// differ (the Windows default is dark taskbar + light apps).
+    /// </summary>
+    internal static bool IsTaskbarDarkTheme()
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(
                 @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            return key?.GetValue("AppsUseLightTheme") is int v && v == 0;
+            object? value = key?.GetValue("SystemUsesLightTheme")
+                         ?? key?.GetValue("AppsUseLightTheme");
+            return value is not int v || v == 0;
         }
-        catch { return false; }
+        catch { return true; }
     }
 
     // ── TOTP secret retrieval ─────────────────────────────────────────────
 
     /// <summary>
-    /// Reads the TOTP secret from Windows Credential Manager.
-    /// Tries the dedicated <c>EasyUniVPN/totp_secret</c> entry written by
-    /// <c>save_profile()</c>, then falls back to the openconnect-saml entry.
-    /// Returns <c>null</c> if setup has not been completed yet.
+    /// Reads the University of Graz TOTP secret from Windows Credential
+    /// Manager (written by setup as service "EasyUniVPN", account
+    /// "totp_secret"), falling back to the openconnect-saml entry the VPN
+    /// profile writes. Returns <c>null</c> if setup has not been completed.
     /// </summary>
     internal static string? ReadTotpSecret()
     {
-        // Modern keyring encodes TargetName as "service/username"
-        string? secret = ReadCred("EasyUniVPN/totp_secret");
-        if (secret != null) { TrayLog.Info("[CRED] found via EasyUniVPN/totp_secret"); return secret; }
+        string? secret = ReadKeyringSecret("EasyUniVPN", "totp_secret");
+        if (secret != null) { TrayLog.Info("[CRED] KFU secret found (EasyUniVPN / totp_secret)"); return secret; }
 
-        // Older keyring versions store TargetName = service only; UserName = username.
-        // The Windows Credential Manager shows this as address="EasyUniVPN", user="totp_secret".
-        secret = ReadCred("EasyUniVPN");
-        if (secret != null) { TrayLog.Info("[CRED] found via EasyUniVPN (service-only TargetName)"); return secret; }
-
-        // Last fallback: openconnect-saml's own entry
+        // Fallback: openconnect-saml's own entry (written for the VPN profile).
         string email = AppConfig.Load().Email;
         if (!string.IsNullOrEmpty(email))
         {
-            secret = ReadCred($"openconnect-saml/totp/{email}");
-            if (secret != null) { TrayLog.Info($"[CRED] found via openconnect-saml/totp/{email}"); return secret; }
+            secret = ReadKeyringSecret("openconnect-saml", $"totp/{email}");
+            if (secret != null) { TrayLog.Info("[CRED] KFU secret found via openconnect-saml entry"); return secret; }
         }
 
-        TrayLog.Warn("[CRED] no TOTP secret found in CredMan (tried EasyUniVPN/totp_secret, EasyUniVPN, openconnect-saml/totp/*)");
+        TrayLog.Warn("[CRED] no University of Graz TOTP secret found in CredMan");
         return null;
     }
 
-    private static string? ReadCred(string target)
+    /// <summary>
+    /// Reads the TU Graz TOTP secret (written by setup as service
+    /// "EasyUniVPN", account "totp_secret_tugraz"). Returns <c>null</c> when
+    /// TU Graz has not been set up.
+    /// </summary>
+    internal static string? ReadTuTotpSecret()
+    {
+        string? secret = ReadKeyringSecret("EasyUniVPN", "totp_secret_tugraz");
+        if (secret == null)
+            TrayLog.Warn("[CRED] no TU Graz TOTP secret found in CredMan (EasyUniVPN / totp_secret_tugraz)");
+        return secret;
+    }
+
+    /// <summary>
+    /// Reads a secret stored by Python's keyring (WinVault backend). keyring
+    /// stores the FIRST account of a service under TargetName = service with
+    /// UserName = account; every FURTHER account of the same service goes to
+    /// TargetName = "account@service". Which layout a given secret lands in
+    /// therefore depends on setup order, so both are tried - plus the
+    /// "service/account" form for manually created entries. The service-only
+    /// read verifies the UserName so one university's secret can never be
+    /// mistaken for the other's.
+    /// </summary>
+    private static string? ReadKeyringSecret(string service, string account)
+    {
+        return ReadCred(service, requiredUsername: account)
+            ?? ReadCred($"{account}@{service}")
+            ?? ReadCred($"{service}/{account}");
+    }
+
+    private static string? ReadCred(string target, string? requiredUsername = null)
     {
         if (!NativeMethods.CredRead(target, NativeMethods.CRED_TYPE_GENERIC, 0, out IntPtr ptr))
             return null;
         try
         {
             var cred = Marshal.PtrToStructure<NativeMethods.CREDENTIAL>(ptr);
+            if (requiredUsername != null)
+            {
+                string? user = cred.UserName == IntPtr.Zero
+                    ? null
+                    : Marshal.PtrToStringUni(cred.UserName);
+                if (!string.Equals(user, requiredUsername, StringComparison.Ordinal))
+                    return null;
+            }
             if (cred.CredentialBlobSize == 0 || cred.CredentialBlob == IntPtr.Zero)
                 return null;
             var bytes = new byte[cred.CredentialBlobSize];
@@ -222,23 +252,56 @@ internal static class TraySettings
 
 /// <summary>
 /// Parsed representation of <c>%APPDATA%\EasyUniVPN\config.json</c>.
-/// Mirrors <c>common/app_config.py::AppConfig</c>.
+/// Mirrors <c>common/app_config.py::AppConfig</c> (config version 2).
+///
+/// KfuMode is "vpn", "totp", or "none"; TU Graz is always codes-only.
+/// Hotkeys are canonical specs like "ctrl+alt+v", "" = disabled. The TOTP
+/// parameters default to what each university issues (KFU: SHA-1/30 s,
+/// TU: SHA-256/60 s).
 /// </summary>
-internal record AppConfig(string Email, bool SetupComplete, bool StartWithWindows)
+internal record AppConfig(
+    string Email, bool SetupComplete, bool StartWithWindows,
+    string KfuMode, bool TuEnabled,
+    string KfuHotkey, string TuHotkey,
+    string KfuTotpAlgorithm, int KfuTotpPeriod, int KfuTotpDigits,
+    string TuTotpAlgorithm, int TuTotpPeriod, int TuTotpDigits)
 {
+    internal bool KfuConfigured => KfuMode is "vpn" or "totp";
+    internal bool VpnEnabled    => KfuMode == "vpn";
+
     internal static AppConfig Load()
     {
         try
         {
             string json = File.ReadAllText(AppPaths.ConfigPath);
+            bool setup = ContainsBool(json, "setup_complete", true);
+
+            // A config without kfu_mode was written before multi-university
+            // support (v1), where a completed setup was always the full
+            // University of Graz VPN with the fixed Ctrl+Alt+V shortcut.
+            bool hasV2 = json.IndexOf("\"kfu_mode\"", StringComparison.Ordinal) >= 0;
+            string kfuMode   = hasV2 ? ExtractString(json, "kfu_mode")   : (setup ? "vpn" : "none");
+            string kfuHotkey = hasV2 ? ExtractString(json, "kfu_hotkey") : (setup ? "ctrl+alt+v" : "");
+
             return new AppConfig(
-                Email:             ExtractString(json, "email"),
-                SetupComplete:     ContainsBool(json, "setup_complete", true),
-                StartWithWindows:  ContainsBool(json, "start_with_windows", true));
+                Email:            ExtractString(json, "email"),
+                SetupComplete:    setup,
+                StartWithWindows: ContainsBool(json, "start_with_windows", true),
+                KfuMode:          string.IsNullOrEmpty(kfuMode) ? "none" : kfuMode,
+                TuEnabled:        ContainsBool(json, "tu_enabled", true),
+                KfuHotkey:        kfuHotkey,
+                TuHotkey:         ExtractString(json, "tu_hotkey"),
+                KfuTotpAlgorithm: ExtractStringOr(json, "kfu_totp_algorithm", "sha1"),
+                KfuTotpPeriod:    ExtractInt(json, "kfu_totp_period", 30),
+                KfuTotpDigits:    ExtractInt(json, "kfu_totp_digits", 6),
+                TuTotpAlgorithm:  ExtractStringOr(json, "tu_totp_algorithm", "sha256"),
+                TuTotpPeriod:     ExtractInt(json, "tu_totp_period", 60),
+                TuTotpDigits:     ExtractInt(json, "tu_totp_digits", 6));
         }
         catch
         {
-            return new AppConfig("", false, false);
+            return new AppConfig("", false, false, "none", false, "", "",
+                                 "sha1", 30, 6, "sha256", 60, 6);
         }
     }
 
@@ -252,6 +315,26 @@ internal record AppConfig(string Email, bool SetupComplete, bool StartWithWindow
         if (i < 0) return "";
         int end = json.IndexOf('"', i + 1);
         return end < 0 ? "" : json.Substring(i + 1, end - i - 1);
+    }
+
+    private static string ExtractStringOr(string json, string key, string fallback)
+    {
+        string value = ExtractString(json, key);
+        return string.IsNullOrEmpty(value) ? fallback : value;
+    }
+
+    private static int ExtractInt(string json, string key, int fallback)
+    {
+        var marker = $"\"{key}\"";
+        int i = json.IndexOf(marker, StringComparison.Ordinal);
+        if (i < 0) return fallback;
+        i += marker.Length;
+        while (i < json.Length && (json[i] == ':' || json[i] == ' ')) i++;
+        int start = i;
+        while (i < json.Length && char.IsDigit(json[i])) i++;
+        return i > start && int.TryParse(json.Substring(start, i - start), out int value)
+            ? value
+            : fallback;
     }
 
     private static bool ContainsBool(string json, string key, bool value)

@@ -16,12 +16,11 @@ import argparse
 import subprocess
 import sys
 
-from common.app_config import configuration_exists
+from common.app_config import configuration_exists, vpn_configured
 from common.elevation import is_admin, relaunch_path_as_admin
 from common.launch import launcher_invocation_args, self_invocation_args
 from common.logger import configure as configure_logging
 from common.logger import get_logger
-from common.openconnect_config import profile_exists
 
 logger = get_logger("launcher")
 
@@ -38,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     configure_logging(verbose=args.verbose)
 
-    if not configuration_exists() or not profile_exists():
+    if not configuration_exists():
         if args.autostart_only:
             logger.verbose("Autostart launch with no completed setup yet - exiting quietly.")
             return 0
@@ -46,7 +45,9 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.Popen(self_invocation_args("setup"), creationflags=subprocess.CREATE_NEW_CONSOLE)
         return 0
 
-    if not is_admin():
+    # Only the VPN needs admin rights (creating the network adapter). A
+    # one-time-codes-only setup runs the tray unelevated - no UAC prompt.
+    if vpn_configured() and not is_admin():
         relaunch_args = launcher_invocation_args(*(argv if argv is not None else sys.argv[1:]))
         if relaunch_path_as_admin(relaunch_args[0], relaunch_args[1:]):
             return 0

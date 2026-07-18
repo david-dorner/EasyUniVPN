@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 
 namespace EasyUniVPN;
 
@@ -158,6 +159,72 @@ internal sealed class VpnController : IDisposable
             killer?.WaitForExit(5_000);
         }
         catch (Exception ex) { TrayLog.Error($"KillTree({pid}): {ex.Message}"); }
+    }
+
+    // ── conflicting VPN detection ────────────────────────────────────────
+
+    // Substrings (lowercase) that identify third-party VPN adapters by name
+    // or driver description. Mirrors _VPN_ADAPTER_HINTS in common/vpn.py -
+    // keep the two lists in sync. Deliberately broad: a false positive only
+    // costs the user a notification, while a missed conflict means
+    // openconnect hangs until its timeout with no explanation.
+    private static readonly string[] VpnAdapterHints =
+    {
+        "nordvpn", "nordlynx", "cloudflare", "warp", "tailscale", "protonvpn",
+        "proton vpn", "expressvpn", "surfshark", "mullvad", "wireguard",
+        "openvpn", "tap-windows", "zerotier", "hamachi", "anyconnect",
+        "fortinet", "fortissl", "globalprotect", "pritunl", "windscribe",
+        "private internet access", "tunnelbear", "hotspot shield", "cyberghost",
+        "wan miniport",  // Windows built-in VPN connections (PPTP/L2TP/SSTP/IKEv2)
+    };
+
+    // Our own tunnel and Windows transition interfaces never count as conflicts.
+    private static readonly string[] VpnAdapterIgnore =
+    {
+        "uni-graz", "univpn", "teredo", "isatap", "loopback",
+    };
+
+    /// <summary>
+    /// Name of a *connected* third-party VPN, or <c>null</c> when none is
+    /// found. Mirrors <c>vpn.py::detect_conflicting_vpn()</c>.
+    ///
+    /// Detection is route-based, not adapter-based: VPN products keep their
+    /// virtual adapter "Up" even while disconnected (NordLynx, for example),
+    /// so the reliable signal is which interface currently routes internet
+    /// traffic. Only a VPN that actually owns that route breaks openconnect.
+    /// </summary>
+    internal static string? DetectConflictingVpn()
+    {
+        try
+        {
+            // Which interface would carry our traffic to the internet right now?
+            byte[] dest = System.Net.IPAddress.Parse("1.1.1.1").GetAddressBytes();
+            if (NativeMethods.GetBestInterface(BitConverter.ToUInt32(dest, 0), out uint bestIndex) != 0)
+                return null;
+
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                int index;
+                try { index = nic.GetIPProperties().GetIPv4Properties()?.Index ?? -1; }
+                catch { continue; }
+                if (index != bestIndex)
+                    continue;
+
+                string text = (nic.Name + " " + nic.Description).ToLowerInvariant();
+                if (VpnAdapterIgnore.Any(skip => text.Contains(skip)))
+                    return null;
+                bool namedVpn = VpnAdapterHints.Any(hint => text.Contains(hint));
+                // Ppp catches Windows built-in VPN connections whatever the
+                // user named them (they only exist while connected).
+                bool builtinVpn = nic.NetworkInterfaceType == NetworkInterfaceType.Ppp;
+                return namedVpn || builtinVpn ? nic.Name : null;
+            }
+        }
+        catch (Exception ex)
+        {
+            TrayLog.Warn($"VPN conflict check failed: {ex.Message}");
+        }
+        return null;
     }
 
     // ── VPN state ────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ the interactive wizard (getpass on Windows reads from con:, not piped stdin).
 
 from __future__ import annotations
 
-from common.app_config import AppConfig, save_app_config
+from common.app_config import KFU_MODE_VPN, load_app_config, save_app_config
 from common.logger import get_logger
 from common.openconnect_config import remove_profile, save_profile
 from common.startup import is_startup_enabled
@@ -34,8 +34,16 @@ def save_credentials_batch(
         logger.error("Invalid TOTP secret: must be a valid base32 string that generates a 6-digit code.")
         return 1
 
-    startup = is_startup_enabled()
-    save_app_config(AppConfig(email=email, start_with_windows=startup, setup_complete=True))
+    # Load-mutate-save so a TU Graz setup or custom shortcuts, if present,
+    # survive the batch write untouched.
+    cfg = load_app_config()
+    cfg.email = email
+    cfg.start_with_windows = is_startup_enabled()
+    cfg.kfu_mode = KFU_MODE_VPN
+    if not cfg.kfu_hotkey:
+        cfg.kfu_hotkey = "ctrl+alt+v"
+    cfg.setup_complete = True
+    save_app_config(cfg)
     remove_profile()
     save_profile(email, password, totp_secret)
     logger.info("Credentials saved.")

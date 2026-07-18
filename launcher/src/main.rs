@@ -2,8 +2,9 @@
 //!
 //! Logic is identical to the Python `easyunivpn/launcher.py`:
 //!   1. If setup is not complete: spawn `EasyUniVPNCli.exe setup` in a new console and exit.
-//!   2. If not running as admin: re-launch self elevated via ShellExecute "runas" and exit.
-//!   3. If setup complete and elevated: spawn `EasyUniVPN.exe` (the C# tray) and exit.
+//!   2. If the VPN is configured but we're not admin: re-launch self elevated
+//!      via ShellExecute "runas" and exit (one-time-codes-only setups skip this).
+//!   3. Otherwise: spawn `EasyUniVPN.exe` (the C# tray) and exit.
 //!
 //! `--autostart-only`: exit silently if setup is not yet complete (logon task mode).
 //! `--verbose` / `-v`:  forwarded to the tray process.
@@ -48,20 +49,31 @@ fn wide(s: &str) -> Vec<u16> {
 
 // ── setup state ─────────────────────────────────────────────────────────────
 
-/// Mirrors `common/app_config.py::configuration_exists()`.
-fn is_setup_complete() -> bool {
+/// The raw config.json text, or an empty string when no config exists yet.
+fn config_text() -> String {
     let Some(appdata) = env::var_os("APPDATA") else {
-        return false;
+        return String::new();
     };
     let config = PathBuf::from(appdata)
         .join("EasyUniVPN")
         .join("config.json");
-    fs::read_to_string(config)
-        .map(|t| {
-            t.contains("\"setup_complete\":true")
-                || t.contains("\"setup_complete\": true")
-        })
-        .unwrap_or(false)
+    fs::read_to_string(config).unwrap_or_default()
+}
+
+/// Mirrors `common/app_config.py::configuration_exists()`. setup_complete is
+/// only ever true with at least one university configured, so this single
+/// flag is sufficient.
+fn is_setup_complete(config: &str) -> bool {
+    config.contains("\"setup_complete\":true") || config.contains("\"setup_complete\": true")
+}
+
+/// Mirrors `common/app_config.py::vpn_configured()`: only the full University
+/// of Graz VPN needs elevation. A config without a `kfu_mode` key predates
+/// multi-university support, where a completed setup was always the full VPN.
+fn vpn_configured(config: &str) -> bool {
+    config.contains("\"kfu_mode\": \"vpn\"")
+        || config.contains("\"kfu_mode\":\"vpn\"")
+        || !config.contains("\"kfu_mode\"")
 }
 
 // ── admin check ─────────────────────────────────────────────────────────────
@@ -114,9 +126,10 @@ fn main() {
     let autostart_only = all_args.iter().any(|a| a == "--autostart-only");
 
     let dir = exe_dir();
+    let config = config_text();
 
     // ── Step 1: setup guard ──────────────────────────────────────────────
-    if !is_setup_complete() {
+    if !is_setup_complete(&config) {
         if autostart_only {
             return;
         }
@@ -130,7 +143,9 @@ fn main() {
     }
 
     // ── Step 2: elevation ────────────────────────────────────────────────
-    if !is_admin() {
+    // Only the VPN needs admin rights (creating the network adapter); a
+    // one-time-codes-only setup runs the tray unelevated with no UAC prompt.
+    if vpn_configured(&config) && !is_admin() {
         let exe = env::current_exe().unwrap_or_default();
         relaunch_elevated(&exe, &all_args);
         return;
